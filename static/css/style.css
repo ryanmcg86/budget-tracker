@@ -1,0 +1,557 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 20px;
+    padding: 30px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+header {
+    text-align: center;
+    margin-bottom: 40px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+h1 {
+    color: #333;
+    font-size: 2.5em;
+    margin-bottom: 10px;
+}
+
+.subtitle {
+    color: #666;
+    font-size: 1.1em;
+}
+
+h2 {
+    color: #444;
+    margin-bottom: 20px;
+    font-size: 1.5em;
+}
+
+.summary-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 25px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.summary-card h3 {
+    font-size: 0.9em;
+    opacity: 0.9;
+    margin-bottom: 10px;
+    font-weight: 500;
+}
+
+.summary-card .amount {
+    font-size: 2em;
+    font-weight: 700;
+}
+
+.summary-card .detail {
+    font-size: 0.85em;
+    opacity: 0.8;
+    margin-top: 8px;
+}
+
+/* Category Section */
+.category-section {
+    background: #f8f9fa;
+    padding: 30px;
+    border-radius: 12px;
+}
+
+#categoryChart {
+    min-height: 400px;
+}
+
+/* Transactions List */
+.transactions-list {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.transaction-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    border-bottom: 1px solid #e0e0e0;
+    transition: background 0.2s ease;
+}
+
+.transaction-item:hover {
+    background: #f8f9fa;
+}
+
+.transaction-item:last-child {
+    border-bottom: none;
+}
+
+.transaction-info {
+    flex: 1;
+}
+
+.transaction-description {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 5px;
+}
+
+.transaction-meta {
+    font-size: 0.85em;
+    color: #666;
+}
+
+.transaction-amount {
+    font-size: 1.2em;
+    font-weight: 700;
+    color: #764ba2;
+}
+
+.transaction-category {
+    display: inline-block;
+    background: #e0e7ff;
+    color: #4c51bf;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    margin-left: 10px;
+}
+
+.loading {
+    text-align: center;
+    color: #999;
+    padding: 40px;
+    font-style: italic;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+    
+    .container {
+        padding: 20px;
+    }
+    
+    h1 {
+        font-size: 2em;
+    }
+    
+    .file-input-wrapper {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .btn-primary {
+        width: 100%;
+    }
+    
+    .transaction-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .summary-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.transaction-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.btn-delete {
+    background: #ff4d4d;
+    color: white;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 0.75em;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-delete:hover {
+    background: #cc0000;
+}
+
+/* Adjust the transaction item for better mobile spacing */
+@media (max-width: 768px) {
+    .transaction-right {
+        flex-direction: row;
+        justify-content: space-between;
+        width: 100%;
+        align-items: center;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed #eee;
+    }
+}
+
+.tab-nav {
+    display: flex;
+    justify-content: space-around;
+    background: #f1f1f1;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    padding: 5px;
+}
+
+.tab-btn {
+    padding: 10px 20px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-weight: bold;
+    color: #666;
+}
+
+.tab-btn.active {
+    background: white;
+    border-radius: 8px;
+    color: #764ba2;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.table-container {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    padding: 15px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th { text-align: left; color: #888; font-size: 0.8em; padding-bottom: 10px; }
+td { padding: 8px 0; border-bottom: 1px solid #f9f9f9; }
+
+@media (max-width: 768px) {
+    .overview-grid { grid-template-columns: 1fr; } /* Stack tables on iPhone */
+}
+
+/* Hide all tab content by default */
+.tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease;
+}
+
+/* Show the active tab */
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.filter-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 15px;
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.filter-grid select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background-color: white;
+}
+
+/* Mobile: Stack them on iPhone */
+@media (max-width: 768px) {
+    .filter-grid {
+        grid-template-columns: 1fr; /* One dropdown per line on mobile */
+    }
+    
+    .date-filters {
+        flex-direction: row; /* Keep Year and Month side-by-side even on mobile */
+    }
+}
+
+
+#fullTransactionsTable {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+#fullTransactionsTable th {
+    background: #eee;
+    padding: 12px;
+    text-align: left;
+}
+
+#fullTransactionsTable td {
+    padding: 12px;
+    border-bottom: 1px solid #eee;
+}
+
+@media (max-width: 768px) {
+    .filter-grid {
+        grid-template-columns: 1fr; /* Stack filters on iPhone */
+    }
+}
+
+.rule-form {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap; /* Allows it to stack on smaller screens */
+    margin-bottom: 20px;
+}
+
+.rule-form input, .rule-form select {
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    flex: 1; /* Makes them grow to fill space */
+    min-width: 150px;
+}
+
+/* Unified Button Base Styles for Toolbar Actions */
+.btn-move, .btn-delete, .btn-edit, .btn-add {
+    display: inline-block;
+    color: white !important;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    text-align: center;
+    transition: opacity 0.2s;
+    min-width: 90px;
+}
+
+.btn-move {
+    background: #3498db; /* Blue */
+}
+
+.btn-delete {
+    background: #e74c3c; /* Red */
+}
+
+.btn-move:hover, .btn-delete:hover, .btn-edit:hover, .btn-add:hover {
+    opacity: 0.8;
+}
+
+/* Table Alignment */
+th, td {
+    text-align: left;
+    padding: 12px 8px;
+}
+
+/* Right-align numeric columns and center-align action columns */
+th:nth-last-child(-n+2), 
+td:nth-last-child(-n+2) {
+    text-align: center;
+}
+
+/* Mobile specific styling for buttons */
+@media (max-width: 768px) {
+    /* On mobile, we make buttons slightly larger for fingers */
+    .btn-move, .btn-delete, .btn-edit, .btn-add { /* Apply unified styles to mobile too */
+        width: 100%;
+        padding: 10px 5px;
+        font-size: 0.85em;
+        min-width: auto;
+    }
+
+    /* Reduce padding on mobile to fit more columns */
+    th, td {
+        padding: 8px 4px;
+        font-size: 0.85em;
+    }
+}
+
+.overview-row {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 40px;
+    align-items: flex-start;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 20px;
+}
+
+.overview-row .table-container {
+    flex: 1; /* Table takes 50% */
+}
+
+.overview-row .chart-container {
+    flex: 1; /* Chart takes 50% */
+    min-height: 350px;
+}
+
+/* Responsive: Stack them on iPhone */
+@media (max-width: 768px) {
+    .overview-row {
+        flex-direction: column;
+    }
+    .overview-row .chart-container {
+        width: 100%;
+        min-height: 300px;
+    }
+}
+
+.table-scroll-container {
+    max-height: 500px; /* Adjust this height based on your preference */
+    overflow-y: auto;  /* Vertical scrollbar only when needed */
+    border: 1px solid #eee;
+    border-radius: 8px;
+    margin-top: 10px;
+}
+
+/* Optional: Make the table headers stay at the top while scrolling */
+.table-scroll-container thead th {
+    position: sticky;
+    top: 0;
+    background-color: #f8f9fa; /* Match your page background */
+    z-index: 10;
+    box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); /* Subtle line under header */
+}
+
+/* Customize scrollbar appearance for a cleaner look */
+.table-scroll-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.table-scroll-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 10px;
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: #999;
+}
+
+@media (max-width: 768px) {
+    .table-scroll-container {
+        max-height: 350px; /* Slightly shorter for phones */
+    }
+}
+
+/* Styling for the checkboxes */
+input[type="checkbox"] {
+    cursor: pointer;
+    transform: scale(1.2);
+}
+
+/* Update table layout for the new structure */
+#fullTransactionsTable td, #paymentsTable td {
+    vertical-align: middle;
+}
+
+/* Add style for the new Edit button */
+.btn-edit:hover {
+    background: #e67e22 !important;
+}
+
+/* Base style for the Account tag */
+.tag-account {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: white;
+    background-color: #666; /* Default gray */
+    text-align: center;
+    min-width: 90px;
+}
+
+/* Chase: Signature Blue */
+.tag-chase {
+    background-color: #117aca;
+    border-bottom: 3px solid #004a97;
+}
+
+/* Capital One: Blue and Red accents */
+.tag-capone {
+    background-color: #00355f;
+    border-left: 4px solid #d03027;
+}
+
+/* Venmo: Bright Blue */
+.tag-venmo {
+    background-color: #3d95ce;
+}
+
+/* Cash / Other */
+.tag-other {
+    background-color: #2c3e50;
+    font-style: italic;
+}
+
+.toggle-btn {
+    padding: 6px 15px;
+    border: 1px solid #ddd;
+    background: white;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.85em;
+    transition: all 0.2s;
+}
+.toggle-btn.active {
+    background: #764ba2;
+    color: white;
+    border-color: #764ba2;
+}
+
+.chart-time-controls .time-btn {
+    padding: 4px 10px;
+    border: 1px solid #ddd;
+    background: white;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.8em;
+    margin-left: 5px;
+    transition: all 0.2s;
+}
+.chart-time-controls .time-btn.active {
+    background: #8e44ad;
+    color: white;
+    border-color: #8e44ad;
+}
