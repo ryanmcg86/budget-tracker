@@ -818,16 +818,19 @@ def plaid_modify_account(account_id):
     return jsonify({'success': True})
 
 
-@app.route('/api/plaid/lookup-profiles', methods=['POST'])
-def plaid_lookup_profiles():
+@app.route('/api/plaid/lookup-shared-profiles', methods=['POST'])
+def plaid_lookup_shared_profiles():
     """
-    Given a list of transaction descriptions, returns the category+tags
-    profile(s) already in the DB for each one.
+    For each description, returns the most recent shared transaction profile
+    (shares list + whether amount was consistent), so the import UI can
+    suggest a split.
 
     Response shape per description:
-      { status: 'unique',   category: '...', tags: ['...'] }   — one consistent profile
-      { status: 'conflict', options: [{category, tags}, ...] } — multiple different profiles
-      { status: 'none' }                                        — no existing transactions
+      None                          — no existing shared transactions
+      { amount_consistent: bool,
+        most_recent_amount: float,
+        shares: [{ person_name, share_amount }],
+        split_percentage: float }   — most recent split as a % of total
     """
     from database import get_db_connection
 
@@ -840,7 +843,66 @@ def plaid_lookup_profiles():
     result = {}
 
     for desc in descriptions:
-        # Fetch all distinct (category, tag list) combos for this description
+        # Fetch all shared transactions for this description, newest first
+        cur.execute('''
+            SELECT t.id, t.amount, t.reimbursement_amount,
+                   ts.person_name, ts.share_amount
+            FROM transactions t
+            JOIN transaction_shares ts ON ts.transaction_id = t.id
+            WHERE t.description = ? AND t.is_shared = 1 AND t.payer = 'Me'
+            ORDER BY t.date DESC
+        ''', (desc,))
+        rows = cur.fetchall()
+
+        if not rows:
+            result[desc] = None
+            continue
+
+        # Group rows back into transactions
+        txn_map = {}
+        for r in rows:
+            tid = r['id']
+            if tid not in txn_map:
+                txn_map[tid] = {'amount': r['amount'], 'shares': []}
+            txn_map[tid]['shares'].append({
+                'person_name': r['person_name'],
+                'share_amount': r['share_amount']
+            })
+
+        txns = list(txn_map.values())
+        amounts = [t['amount'] for t in txns]
+        amount_consistent = len(set(amounts)) == 1
+        most_recent = txns[0]
+
+        result[desc] = {
+            'amount_consistent': amount_consistent,
+            'most_recent_amount': most_recent['amount'],
+            'shares': most_recent['shares'],
+        }
+
+    conn.close()
+    return jsonify(result)
+
+
+@app.route('/api/plaid/lookup-profiles', methods=['POST'])
+def plaid_lookup_profiles():
+    """
+    Given a list of transaction descriptions, returns:
+    1. category+tags profile(s) for each description
+    2. shared transaction history for each description (for split suggestions)
+    """
+    from database import get_db_connection
+
+    descriptions = request.json.get('descriptions', [])
+    if not descriptions:
+        return jsonify({})
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    result = {}
+
+    for desc in descriptions:
+        # --- Category + tags profiles ---
         cur.execute('''
             SELECT t.id, t.category, GROUP_CONCAT(tg.name, '|||') as tag_names
             FROM transactions t
@@ -852,10 +914,9 @@ def plaid_lookup_profiles():
         rows = cur.fetchall()
 
         if not rows:
-            result[desc] = {'status': 'none'}
+            result[desc] = {'status': 'none', 'shared_history': []}
             continue
 
-        # Build a set of distinct (category, frozenset of tags) combos
         combos = {}
         for row in rows:
             cat = row['category'] or ''
@@ -864,11 +925,41 @@ def plaid_lookup_profiles():
             combos[key] = {'category': cat, 'tags': tags}
 
         unique_combos = list(combos.values())
-
         if len(unique_combos) == 1:
-            result[desc] = {'status': 'unique', **unique_combos[0]}
+            profile = {'status': 'unique', **unique_combos[0]}
         else:
-            result[desc] = {'status': 'conflict', 'options': unique_combos}
+            profile = {'status': 'conflict', 'options': unique_combos}
+
+        # --- Shared transaction history ---
+        cur.execute('''
+            SELECT t.id, t.amount, t.date, t.payer, t.reimbursement_amount,
+                   GROUP_CONCAT(ts.person_name || ':' || ts.share_amount, '|||') as shares
+            FROM transactions t
+            LEFT JOIN transaction_shares ts ON ts.transaction_id = t.id
+            WHERE t.description = ? AND t.is_shared = 1
+            ORDER BY t.date DESC
+            LIMIT 10
+        ''', (desc,))
+        shared_rows = cur.fetchall()
+
+        shared_history = []
+        for row in shared_rows:
+            shares = []
+            if row['shares']:
+                for part in row['shares'].split('|||'):
+                    if ':' in part:
+                        name, amt = part.rsplit(':', 1)
+                        shares.append({'person_name': name, 'share_amount': float(amt)})
+            shared_history.append({
+                'id': row['id'],
+                'amount': float(row['amount']),
+                'date': row['date'],
+                'payer': row['payer'],
+                'reimbursement_amount': float(row['reimbursement_amount'] or 0),
+                'shares': shares,
+            })
+
+        result[desc] = {**profile, 'shared_history': shared_history}
 
     conn.close()
     return jsonify(result)
@@ -969,10 +1060,8 @@ def plaid_import_transactions():
                     if new_id:
                         inserted += 1
 
-                # Apply resolved tags if any
                 if new_id and resolved_tags:
                     for tag_name in resolved_tags:
-                        # Get or create the tag
                         cur.execute('SELECT id FROM tags WHERE name = ?', (tag_name,))
                         tag_row = cur.fetchone()
                         if tag_row:
@@ -980,11 +1069,28 @@ def plaid_import_transactions():
                         else:
                             cur.execute('INSERT INTO tags (name) VALUES (?)', (tag_name,))
                             tag_id = cur.lastrowid
-                        # Attach to the transaction (ignore if already linked)
                         cur.execute('''
                             INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id)
                             VALUES (?, ?)
                         ''', (new_id, tag_id))
+
+                # Apply shared split if resolved
+                resolved_shares = t.get('resolved_shares')
+                if new_id and resolved_shares:
+                    total_reimb = 0
+                    cur.execute('DELETE FROM transaction_shares WHERE transaction_id = ?', (new_id,))
+                    for share in resolved_shares:
+                        amt = float(share['share_amount'])
+                        cur.execute('''
+                            INSERT INTO transaction_shares (transaction_id, person_name, share_amount)
+                            VALUES (?, ?, ?)
+                        ''', (new_id, share['person_name'], amt))
+                        total_reimb += amt
+                    cur.execute('''
+                        UPDATE transactions
+                        SET is_shared = 1, payer = 'Me', reimbursement_amount = ?
+                        WHERE id = ?
+                    ''', (total_reimb, new_id))
 
             except Exception:
                 pass

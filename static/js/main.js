@@ -2030,9 +2030,189 @@ function plaidSelectAll(checked) {
     document.querySelectorAll('.plaid-candidate-check').forEach(cb => cb.checked = checked);
 }
 
-// Conflict resolution state — one pending conflict resolved at a time via the modal
-let _conflictQueue = [];
-let _conflictResolve = null; // Promise resolver for the current modal
+// Shared split modal state
+let _splitResolve = null;
+
+function addSplitPersonRow(personName = '', shareAmount = '') {
+    const container = document.getElementById('splitPersonRows');
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:8px;';
+    row.innerHTML = `
+        <input type="text" placeholder="Person's name" value="${personName}"
+               style="flex:2; padding:9px; border:1px solid #ddd; border-radius:6px; font-size:0.9em;">
+        <span style="color:#888;">owes $</span>
+        <input type="number" placeholder="0.00" value="${shareAmount}" min="0" step="0.01"
+               style="flex:1; padding:9px; border:1px solid #ddd; border-radius:6px; font-size:0.9em;">
+        <button onclick="this.parentElement.remove()" style="background:none; border:none; color:#e74c3c; font-size:1.2em; cursor:pointer; padding:0 4px;">×</button>
+    `;
+    container.appendChild(row);
+}
+
+function resolveSharedSplit(apply) {
+    document.getElementById('sharedSplitModal').style.display = 'none';
+    if (!_splitResolve) return;
+
+    if (!apply) {
+        _splitResolve(null);
+        _splitResolve = null;
+        return;
+    }
+
+    const rows = document.querySelectorAll('#splitPersonRows > div');
+    const shares = [];
+    rows.forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        const name = inputs[0].value.trim();
+        const amount = parseFloat(inputs[1].value);
+        if (name && !isNaN(amount) && amount > 0) {
+            shares.push({ person_name: name, share_amount: amount });
+        }
+    });
+
+    _splitResolve(shares.length ? shares : null);
+    _splitResolve = null;
+}
+
+function showSharedSplitModal(description, newAmount, profile) {
+    return new Promise(resolve => {
+        _splitResolve = resolve;
+
+        document.getElementById('splitModalDesc').textContent = `"${description}"`;
+        document.getElementById('splitPersonRows').innerHTML = '';
+
+        const amountMatch = profile && Math.abs(profile.most_recent_amount - newAmount) < 0.01;
+
+        let subText;
+        if (!profile) {
+            subText = `No previous split found for this transaction ($${newAmount.toFixed(2)}). Enter the split below, or click "Not shared".`;
+        } else if (amountMatch) {
+            subText = `Previously split at the same amount ($${newAmount.toFixed(2)}). The suggested split is pre-filled — adjust if needed.`;
+        } else {
+            subText = `Previously shared at $${profile.most_recent_amount.toFixed(2)}, but this charge is $${newAmount.toFixed(2)}. Confirm the split below.`;
+        }
+        document.getElementById('splitModalSub').textContent = subText;
+
+        if (profile) {
+            // Pre-fill with previous shares; if amount changed, scale proportionally
+            profile.shares.forEach(s => {
+                let suggestedAmount = s.share_amount;
+                if (!amountMatch && profile.most_recent_amount > 0) {
+                    // Scale the share proportionally to the new total
+                    suggestedAmount = parseFloat(((s.share_amount / profile.most_recent_amount) * newAmount).toFixed(2));
+                }
+                addSplitPersonRow(s.person_name, suggestedAmount);
+            });
+        } else {
+            addSplitPersonRow(); // blank row to start
+        }
+
+        document.getElementById('sharedSplitModal').style.display = 'block';
+    });
+}
+
+async function importSelectedPlaidTransactions() {
+    const checked = Array.from(document.querySelectorAll('.plaid-candidate-check:checked'))
+        .map(cb => plaidCandidates[parseInt(cb.dataset.index)]);
+
+    if (!checked.length) { alert('No transactions selected.'); return; }
+
+    const status = document.getElementById('plaidImportStatus');
+    const uniqueDescs = [...new Set(checked.map(t => t.description))];
+
+    // 1. Category + tags profile lookup
+    status.textContent = 'Looking up profiles…';
+    const profileRes = await fetch('/api/plaid/lookup-profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descriptions: uniqueDescs })
+    });
+    const profiles = await profileRes.json();
+
+    // 2. Shared split profile lookup
+    const sharedRes = await fetch('/api/plaid/lookup-shared-profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descriptions: uniqueDescs })
+    });
+    const sharedProfiles = await sharedRes.json();
+
+    // 3. Resolve category/tag conflicts
+    const resolvedProfiles = {};
+    for (const desc of uniqueDescs) {
+        const profile = profiles[desc];
+        if (!profile || profile.status === 'none') {
+            resolvedProfiles[desc] = null;
+        } else if (profile.status === 'unique') {
+            resolvedProfiles[desc] = { category: profile.category, tags: profile.tags };
+        } else {
+            status.textContent = 'Resolving category conflicts…';
+            resolvedProfiles[desc] = await showConflictModal(desc, profile.options);
+        }
+    }
+
+    // 4. Resolve shared splits — one modal per description that has a shared history
+    //    or where THIS specific transaction amount differs from the previous one
+    const resolvedShares = {}; // description -> shares array or null
+
+    // We need to handle each TRANSACTION individually since amounts may differ
+    // Build a per-transaction resolution map keyed by plaid_transaction_id
+    const resolvedSharesById = {};
+
+    // Group checked transactions by description so we only ask once per description
+    // UNLESS amounts differ within the same description batch
+    const descGroups = {};
+    checked.forEach(t => {
+        if (!descGroups[t.description]) descGroups[t.description] = [];
+        descGroups[t.description].push(t);
+    });
+
+    for (const desc of uniqueDescs) {
+        const sharedProfile = sharedProfiles[desc];
+        // Only prompt if this description has ever been shared
+        if (!sharedProfile) continue;
+
+        const group = descGroups[desc];
+        // Find unique amounts in this batch for this description
+        const uniqueAmounts = [...new Set(group.map(t => t.amount))];
+
+        for (const amount of uniqueAmounts) {
+            status.textContent = 'Reviewing shared splits…';
+            const shares = await showSharedSplitModal(desc, amount, sharedProfile);
+            // Apply this resolution to all transactions in the batch with this amount
+            group.filter(t => t.amount === amount).forEach(t => {
+                resolvedSharesById[t.plaid_transaction_id] = shares;
+            });
+        }
+    }
+
+    // 5. Enrich each transaction with resolved data
+    const enriched = checked.map(t => ({
+        ...t,
+        category: resolvedProfiles[t.description]?.category || '',
+        resolved_tags: resolvedProfiles[t.description]?.tags || [],
+        resolved_shares: resolvedSharesById[t.plaid_transaction_id] || null,
+    }));
+
+    status.textContent = 'Importing…';
+
+    const res = await fetch('/api/plaid/import-transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactions: enriched })
+    });
+    const data = await res.json();
+
+    if (data.error) { status.textContent = 'Error: ' + data.error; return; }
+
+    status.textContent = `✓ ${data.inserted} transaction${data.inserted !== 1 ? 's' : ''} imported.`;
+
+    const importedIds = new Set(checked.map(t => t.plaid_transaction_id));
+    plaidCandidates = plaidCandidates.filter(t => !importedIds.has(t.plaid_transaction_id));
+    renderPlaidCandidates();
+
+    await loadFullTransactions();
+    loadSummary();
+}
 
 function resolveConflict(choice) {
     document.getElementById('profileConflictModal').style.display = 'none';
@@ -2073,73 +2253,6 @@ function showConflictModal(description, options) {
     });
 }
 
-async function importSelectedPlaidTransactions() {
-    const checked = Array.from(document.querySelectorAll('.plaid-candidate-check:checked'))
-        .map(cb => plaidCandidates[parseInt(cb.dataset.index)]);
-
-    if (!checked.length) { alert('No transactions selected.'); return; }
-
-    const status = document.getElementById('plaidImportStatus');
-    status.textContent = 'Looking up profiles…';
-
-    // 1. Fetch profiles for all unique descriptions in the selection
-    const uniqueDescs = [...new Set(checked.map(t => t.description))];
-    const profileRes = await fetch('/api/plaid/lookup-profiles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ descriptions: uniqueDescs })
-    });
-    const profiles = await profileRes.json();
-
-    // 2. Resolve any conflicts one at a time via modal, then auto-assign the rest
-    const resolvedProfiles = {}; // description -> {category, tags} or null
-
-    for (const desc of uniqueDescs) {
-        const profile = profiles[desc];
-        if (!profile || profile.status === 'none') {
-            resolvedProfiles[desc] = null;
-        } else if (profile.status === 'unique') {
-            resolvedProfiles[desc] = { category: profile.category, tags: profile.tags };
-        } else if (profile.status === 'conflict') {
-            // Show modal and wait for user choice
-            status.textContent = `Resolving conflicts…`;
-            resolvedProfiles[desc] = await showConflictModal(desc, profile.options);
-        }
-    }
-
-    // 3. Apply resolved profiles to each transaction before sending to backend
-    const enriched = checked.map(t => {
-        const profile = resolvedProfiles[t.description];
-        return {
-            ...t,
-            category: profile?.category || '',
-            resolved_tags: profile?.tags || [],
-        };
-    });
-
-    status.textContent = 'Importing…';
-
-    const res = await fetch('/api/plaid/import-transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactions: enriched })
-    });
-    const data = await res.json();
-
-    if (data.error) {
-        status.textContent = 'Error: ' + data.error;
-        return;
-    }
-
-    status.textContent = `✓ ${data.inserted} transaction${data.inserted !== 1 ? 's' : ''} imported.`;
-
-    const importedIds = new Set(checked.map(t => t.plaid_transaction_id));
-    plaidCandidates = plaidCandidates.filter(t => !importedIds.has(t.plaid_transaction_id));
-    renderPlaidCandidates();
-
-    await loadFullTransactions();
-    loadSummary();
-}
 
 //---------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', async function() {

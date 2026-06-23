@@ -576,6 +576,40 @@
         </div>
     </div>
 
+    <!-- Plaid Shared Split Modal -->
+    <div id="sharedSplitModal" style="display:none; position:fixed; z-index:200; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); overflow-y:auto;">
+        <div style="background:white; margin:7% auto; padding:28px; border-radius:12px; width:90%; max-width:540px;">
+            <h3 style="margin-bottom:4px;">Shared transaction</h3>
+            <p id="splitModalDesc" style="font-weight:600; color:#764ba2; margin-bottom:4px;"></p>
+            <p id="splitModalSub" style="font-size:0.85em; color:#888; margin-bottom:18px;"></p>
+
+            <!-- Per-person rows -->
+            <div id="splitPersonRows" style="margin-bottom:16px;"></div>
+            <button onclick="addSplitPersonRow()" style="font-size:0.85em; color:#764ba2; background:none; border:1px dashed #c39bd3; border-radius:6px; padding:5px 12px; cursor:pointer; margin-bottom:18px;">+ Add another person</button>
+
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button onclick="resolveSharedSplit(false)" style="padding:9px 18px; border:1px solid #ddd; border-radius:6px; cursor:pointer; background:white;">Not shared</button>
+                <button onclick="resolveSharedSplit(true)" style="padding:9px 18px; background:#764ba2; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Apply split</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Plaid Profile Conflict Modal -->
+    <div id="profileConflictModal" style="display:none; position:fixed; z-index:200; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); overflow-y:auto;">
+        <div style="background:white; margin:8% auto; padding:28px; border-radius:12px; width:90%; max-width:520px;">
+            <h3 style="margin-bottom:6px;">Multiple profiles found</h3>
+            <p id="conflictModalDesc" style="font-weight:600; color:#764ba2; margin-bottom:4px;"></p>
+            <p style="font-size:0.85em; color:#888; margin-bottom:18px;">
+                This description has been categorised differently before. Pick which profile to apply to the new transaction, or leave it blank to assign manually later.
+            </p>
+            <div id="conflictOptionsList" style="margin-bottom:20px;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button onclick="resolveConflict(null)" style="padding:9px 18px; border:1px solid #ddd; border-radius:6px; cursor:pointer; background:white;">Leave blank</button>
+                <button onclick="resolveConflict('selected')" style="padding:9px 18px; background:#764ba2; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Apply selected</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Edit Transaction Modal -->
     <div id="editModal" class="modal" style="display:none; position:fixed; z-index:100; left:0; top:0; width:100%; height:100%; background-color: rgba(0,0,0,0.5);">
         <div class="modal-content" style="background-color:white; margin:10% auto; padding:25px; border-radius:12px; width:90%; max-width:500px;">
