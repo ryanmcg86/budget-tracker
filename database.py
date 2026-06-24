@@ -216,6 +216,17 @@ def init_db():
         )
     ''')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS breakdown_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            category TEXT NOT NULL,
+            tag_ids TEXT NOT NULL,
+            view_mode TEXT NOT NULL DEFAULT 'net',
+            time_range TEXT NOT NULL DEFAULT '6m'
+        )
+    ''')
+
     conn.commit()
     conn.close()
 

@@ -25,11 +25,7 @@ from plaid.model.products import Products
 
 def _get_client():
     env_name = os.getenv('PLAID_ENV', 'sandbox').lower()
-
-    # plaid-python v40 puts Environment in plaid.configuration.
-    # Development tier uses the Production host with the production secret.
     host = Environment.Production if env_name in ('production', 'development') else Environment.Sandbox
-
     configuration = Configuration(
         host=host,
         api_key={

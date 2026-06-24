@@ -601,6 +601,53 @@ def tag_defaults():
     conn.close()
     return jsonify(defaults)
 
+@app.route('/api/breakdown-views', methods=['GET', 'POST'])
+def breakdown_views():
+    from database import get_db_connection
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == 'POST':
+        data = request.json
+        try:
+            cur.execute('''
+                INSERT INTO breakdown_views (name, category, tag_ids, view_mode, time_range)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    category=excluded.category,
+                    tag_ids=excluded.tag_ids,
+                    view_mode=excluded.view_mode,
+                    time_range=excluded.time_range
+            ''', (
+                data['name'], data['category'],
+                data['tag_ids'],   # JSON string of id array
+                data.get('view_mode', 'net'),
+                data.get('time_range', '6m'),
+            ))
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True})
+        except Exception as e:
+            conn.close()
+            return jsonify({'error': str(e)}), 500
+
+    cur.execute('SELECT * FROM breakdown_views ORDER BY name')
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route('/api/breakdown-views/<int:view_id>', methods=['DELETE'])
+def delete_breakdown_view(view_id):
+    from database import get_db_connection
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM breakdown_views WHERE id = ?', (view_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
 @app.route('/api/breakdown-report')
 def breakdown_report():
     year = request.args.get('year')
@@ -614,25 +661,44 @@ def breakdown_report():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Table Data: Totals per tag for the selected period
+    from dateutil.relativedelta import relativedelta
+
+    # Shared date range used by both the table and the graph
+    end_date = datetime(int(year), int(month), 1)
+    if time_range == '3m':
+        start_date = end_date - relativedelta(months=2)
+    elif time_range == '6m':
+        start_date = end_date - relativedelta(months=5)
+    elif time_range == '1y':
+        start_date = end_date - relativedelta(months=11)
+    elif time_range == '5y':
+        start_date = end_date - relativedelta(years=4, months=11)
+    else:
+        start_date = end_date
+
+    start_str = start_date.strftime('%Y-%m-%d')
+    # Exclusive upper bound: first day of the month after end_date
+    end_str = (end_date + relativedelta(months=1)).strftime('%Y-%m-%d')
+
+    # 1. Table Data: all transactions in the full time range
     amount_sql_case = f'''
-        CASE 
+        CASE
             WHEN t.payer = 'Me' THEN {"t.amount" if view_mode == "gross" else "(t.amount - COALESCE(t.reimbursement_amount, 0))"}
             ELSE COALESCE(t.reimbursement_amount, 0)
         END
     '''
-    
+
     table_sql = f'''
-        SELECT 
+        SELECT
             t.id, t.date, t.description,
             ({amount_sql_case}) as display_amount
         FROM transactions t
         WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({",".join(["?"]*len(tag_ids))}))
-        AND strftime('%Y', date) = ? AND strftime('%m', date) = ? 
+        AND t.date >= ? AND t.date < ?
         AND t.category = ? AND t.is_payment = 0
         ORDER BY t.date DESC
     '''
-    cursor.execute(table_sql, (*tag_ids, year, month, category))
+    cursor.execute(table_sql, (*tag_ids, start_str, end_str, category))
     rows = cursor.fetchall()
     table_data = []
     for r in rows:
@@ -647,22 +713,8 @@ def breakdown_report():
         item['tags'] = [{'id': tr['id'], 'name': tr['name']} for tr in cursor.fetchall()]
         table_data.append(item)
 
-    # 2. Graph Data: 12-month history of the aggregate spend for the selected tags
+    # 2. Graph Data: monthly totals across the time range
     graph_data = []
-    from dateutil.relativedelta import relativedelta
-    
-    # The end date is now the selected month and year from the dropdowns
-    end_date = datetime(int(year), int(month), 1)
-
-    # Determine the start date for the graph relative to the end_date
-    if time_range == '3m':
-        start_date = end_date - relativedelta(months=2)
-    elif time_range == '6m':
-        start_date = end_date - relativedelta(months=5)
-    elif time_range == '1y':
-        start_date = end_date - relativedelta(months=11)
-    elif time_range == '5y':
-        start_date = end_date - relativedelta(years=4, months=11)
     
     # Generate monthly totals within the range
     current_date = start_date
@@ -820,18 +872,6 @@ def plaid_modify_account(account_id):
 
 @app.route('/api/plaid/lookup-shared-profiles', methods=['POST'])
 def plaid_lookup_shared_profiles():
-    """
-    For each description, returns the most recent shared transaction profile
-    (shares list + whether amount was consistent), so the import UI can
-    suggest a split.
-
-    Response shape per description:
-      None                          — no existing shared transactions
-      { amount_consistent: bool,
-        most_recent_amount: float,
-        shares: [{ person_name, share_amount }],
-        split_percentage: float }   — most recent split as a % of total
-    """
     from database import get_db_connection
 
     descriptions = request.json.get('descriptions', [])
@@ -843,7 +883,6 @@ def plaid_lookup_shared_profiles():
     result = {}
 
     for desc in descriptions:
-        # Fetch all shared transactions for this description, newest first
         cur.execute('''
             SELECT t.id, t.amount, t.reimbursement_amount,
                    ts.person_name, ts.share_amount
@@ -858,7 +897,6 @@ def plaid_lookup_shared_profiles():
             result[desc] = None
             continue
 
-        # Group rows back into transactions
         txn_map = {}
         for r in rows:
             tid = r['id']
@@ -883,13 +921,16 @@ def plaid_lookup_shared_profiles():
     conn.close()
     return jsonify(result)
 
-
 @app.route('/api/plaid/lookup-profiles', methods=['POST'])
 def plaid_lookup_profiles():
     """
-    Given a list of transaction descriptions, returns:
-    1. category+tags profile(s) for each description
-    2. shared transaction history for each description (for split suggestions)
+    Given a list of transaction descriptions, returns the category+tags
+    profile(s) already in the DB for each one.
+
+    Response shape per description:
+      { status: 'unique',   category: '...', tags: ['...'] }   — one consistent profile
+      { status: 'conflict', options: [{category, tags}, ...] } — multiple different profiles
+      { status: 'none' }                                        — no existing transactions
     """
     from database import get_db_connection
 
@@ -902,7 +943,7 @@ def plaid_lookup_profiles():
     result = {}
 
     for desc in descriptions:
-        # --- Category + tags profiles ---
+        # Fetch all distinct (category, tag list) combos for this description
         cur.execute('''
             SELECT t.id, t.category, GROUP_CONCAT(tg.name, '|||') as tag_names
             FROM transactions t
@@ -914,9 +955,10 @@ def plaid_lookup_profiles():
         rows = cur.fetchall()
 
         if not rows:
-            result[desc] = {'status': 'none', 'shared_history': []}
+            result[desc] = {'status': 'none'}
             continue
 
+        # Build a set of distinct (category, frozenset of tags) combos
         combos = {}
         for row in rows:
             cat = row['category'] or ''
@@ -925,44 +967,47 @@ def plaid_lookup_profiles():
             combos[key] = {'category': cat, 'tags': tags}
 
         unique_combos = list(combos.values())
+
         if len(unique_combos) == 1:
-            profile = {'status': 'unique', **unique_combos[0]}
+            result[desc] = {'status': 'unique', **unique_combos[0]}
         else:
-            profile = {'status': 'conflict', 'options': unique_combos}
-
-        # --- Shared transaction history ---
-        cur.execute('''
-            SELECT t.id, t.amount, t.date, t.payer, t.reimbursement_amount,
-                   GROUP_CONCAT(ts.person_name || ':' || ts.share_amount, '|||') as shares
-            FROM transactions t
-            LEFT JOIN transaction_shares ts ON ts.transaction_id = t.id
-            WHERE t.description = ? AND t.is_shared = 1
-            ORDER BY t.date DESC
-            LIMIT 10
-        ''', (desc,))
-        shared_rows = cur.fetchall()
-
-        shared_history = []
-        for row in shared_rows:
-            shares = []
-            if row['shares']:
-                for part in row['shares'].split('|||'):
-                    if ':' in part:
-                        name, amt = part.rsplit(':', 1)
-                        shares.append({'person_name': name, 'share_amount': float(amt)})
-            shared_history.append({
-                'id': row['id'],
-                'amount': float(row['amount']),
-                'date': row['date'],
-                'payer': row['payer'],
-                'reimbursement_amount': float(row['reimbursement_amount'] or 0),
-                'shares': shares,
-            })
-
-        result[desc] = {**profile, 'shared_history': shared_history}
+            result[desc] = {'status': 'conflict', 'options': unique_combos}
 
     conn.close()
     return jsonify(result)
+
+
+def _filter_internal_transfers(candidates):
+    """Remove internal transfer pairs from import candidates.
+
+    Each rule is a (side_a_desc, side_b_desc) tuple. Both sides of a matched
+    pair have amounts that sum to zero and dates within 5 days of each other.
+
+    Known pairs:
+      - Venmo "Standard transfer" ↔ CapOne "Venmo" (moving cash to checking)
+      - CapOne "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile" (monthly bill pay)
+    """
+    from datetime import date as date_type
+
+    TRANSFER_PAIRS = [
+        ('standard transfer', 'venmo'),
+        ('chase credit crd',  'payment thank you-mobile'),
+    ]
+
+    to_remove = set()
+    for desc_a, desc_b in TRANSFER_PAIRS:
+        side_a = [t for t in candidates if t['description'].lower() == desc_a]
+        side_b = [t for t in candidates if t['description'].lower() == desc_b]
+        for ta in side_a:
+            for tb in side_b:
+                if abs(ta['amount'] + tb['amount']) < 0.01:
+                    date_a = date_type.fromisoformat(ta['date'])
+                    date_b = date_type.fromisoformat(tb['date'])
+                    if abs((date_a - date_b).days) <= 5:
+                        to_remove.add(ta['plaid_transaction_id'])
+                        to_remove.add(tb['plaid_transaction_id'])
+
+    return [t for t in candidates if t['plaid_transaction_id'] not in to_remove]
 
 
 @app.route('/api/plaid/fetch-transactions', methods=['POST'])
@@ -1001,6 +1046,8 @@ def plaid_fetch_transactions():
                     t['card_name'] = acct['account_name']
                     t['institution_name'] = acct['institution_name']
                     candidates.append(t)
+
+        candidates = _filter_internal_transfers(candidates)
 
         # Sort newest first so the most recent transactions are at the top
         candidates.sort(key=lambda x: x['date'], reverse=True)
@@ -1060,8 +1107,10 @@ def plaid_import_transactions():
                     if new_id:
                         inserted += 1
 
+                # Apply resolved tags if any
                 if new_id and resolved_tags:
                     for tag_name in resolved_tags:
+                        # Get or create the tag
                         cur.execute('SELECT id FROM tags WHERE name = ?', (tag_name,))
                         tag_row = cur.fetchone()
                         if tag_row:
@@ -1069,28 +1118,27 @@ def plaid_import_transactions():
                         else:
                             cur.execute('INSERT INTO tags (name) VALUES (?)', (tag_name,))
                             tag_id = cur.lastrowid
+                        # Attach to the transaction (ignore if already linked)
                         cur.execute('''
                             INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id)
                             VALUES (?, ?)
                         ''', (new_id, tag_id))
 
-                # Apply shared split if resolved
+                # Apply shared split if any
                 resolved_shares = t.get('resolved_shares')
                 if new_id and resolved_shares:
-                    total_reimb = 0
+                    cur.execute('UPDATE transactions SET is_shared = 1, payer = ? WHERE id = ?', ('Me', new_id))
                     cur.execute('DELETE FROM transaction_shares WHERE transaction_id = ?', (new_id,))
+                    total_reimbursement = 0
                     for share in resolved_shares:
-                        amt = float(share['share_amount'])
-                        cur.execute('''
-                            INSERT INTO transaction_shares (transaction_id, person_name, share_amount)
-                            VALUES (?, ?, ?)
-                        ''', (new_id, share['person_name'], amt))
-                        total_reimb += amt
-                    cur.execute('''
-                        UPDATE transactions
-                        SET is_shared = 1, payer = 'Me', reimbursement_amount = ?
-                        WHERE id = ?
-                    ''', (total_reimb, new_id))
+                        amt = float(share.get('share_amount', 0))
+                        total_reimbursement += amt
+                        cur.execute(
+                            'INSERT INTO transaction_shares (transaction_id, person_name, share_amount) VALUES (?, ?, ?)',
+                            (new_id, share.get('person_name'), amt)
+                        )
+                    cur.execute('UPDATE transactions SET reimbursement_amount = ? WHERE id = ?',
+                                (total_reimbursement, new_id))
 
             except Exception:
                 pass
