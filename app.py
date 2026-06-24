@@ -601,6 +601,53 @@ def tag_defaults():
     conn.close()
     return jsonify(defaults)
 
+@app.route('/api/breakdown-views', methods=['GET', 'POST'])
+def breakdown_views():
+    from database import get_db_connection
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == 'POST':
+        data = request.json
+        try:
+            cur.execute('''
+                INSERT INTO breakdown_views (name, category, tag_ids, view_mode, time_range)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    category=excluded.category,
+                    tag_ids=excluded.tag_ids,
+                    view_mode=excluded.view_mode,
+                    time_range=excluded.time_range
+            ''', (
+                data['name'], data['category'],
+                data['tag_ids'],   # JSON string of id array
+                data.get('view_mode', 'net'),
+                data.get('time_range', '6m'),
+            ))
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True})
+        except Exception as e:
+            conn.close()
+            return jsonify({'error': str(e)}), 500
+
+    cur.execute('SELECT * FROM breakdown_views ORDER BY name')
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route('/api/breakdown-views/<int:view_id>', methods=['DELETE'])
+def delete_breakdown_view(view_id):
+    from database import get_db_connection
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM breakdown_views WHERE id = ?', (view_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
 @app.route('/api/breakdown-report')
 def breakdown_report():
     year = request.args.get('year')
@@ -614,25 +661,44 @@ def breakdown_report():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Table Data: Totals per tag for the selected period
+    from dateutil.relativedelta import relativedelta
+
+    # Shared date range used by both the table and the graph
+    end_date = datetime(int(year), int(month), 1)
+    if time_range == '3m':
+        start_date = end_date - relativedelta(months=2)
+    elif time_range == '6m':
+        start_date = end_date - relativedelta(months=5)
+    elif time_range == '1y':
+        start_date = end_date - relativedelta(months=11)
+    elif time_range == '5y':
+        start_date = end_date - relativedelta(years=4, months=11)
+    else:
+        start_date = end_date
+
+    start_str = start_date.strftime('%Y-%m-%d')
+    # Exclusive upper bound: first day of the month after end_date
+    end_str = (end_date + relativedelta(months=1)).strftime('%Y-%m-%d')
+
+    # 1. Table Data: all transactions in the full time range
     amount_sql_case = f'''
-        CASE 
+        CASE
             WHEN t.payer = 'Me' THEN {"t.amount" if view_mode == "gross" else "(t.amount - COALESCE(t.reimbursement_amount, 0))"}
             ELSE COALESCE(t.reimbursement_amount, 0)
         END
     '''
-    
+
     table_sql = f'''
-        SELECT 
+        SELECT
             t.id, t.date, t.description,
             ({amount_sql_case}) as display_amount
         FROM transactions t
         WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({",".join(["?"]*len(tag_ids))}))
-        AND strftime('%Y', date) = ? AND strftime('%m', date) = ? 
+        AND t.date >= ? AND t.date < ?
         AND t.category = ? AND t.is_payment = 0
         ORDER BY t.date DESC
     '''
-    cursor.execute(table_sql, (*tag_ids, year, month, category))
+    cursor.execute(table_sql, (*tag_ids, start_str, end_str, category))
     rows = cursor.fetchall()
     table_data = []
     for r in rows:
@@ -647,22 +713,8 @@ def breakdown_report():
         item['tags'] = [{'id': tr['id'], 'name': tr['name']} for tr in cursor.fetchall()]
         table_data.append(item)
 
-    # 2. Graph Data: 12-month history of the aggregate spend for the selected tags
+    # 2. Graph Data: monthly totals across the time range
     graph_data = []
-    from dateutil.relativedelta import relativedelta
-    
-    # The end date is now the selected month and year from the dropdowns
-    end_date = datetime(int(year), int(month), 1)
-
-    # Determine the start date for the graph relative to the end_date
-    if time_range == '3m':
-        start_date = end_date - relativedelta(months=2)
-    elif time_range == '6m':
-        start_date = end_date - relativedelta(months=5)
-    elif time_range == '1y':
-        start_date = end_date - relativedelta(months=11)
-    elif time_range == '5y':
-        start_date = end_date - relativedelta(years=4, months=11)
     
     # Generate monthly totals within the range
     current_date = start_date
@@ -818,6 +870,57 @@ def plaid_modify_account(account_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/plaid/lookup-shared-profiles', methods=['POST'])
+def plaid_lookup_shared_profiles():
+    from database import get_db_connection
+
+    descriptions = request.json.get('descriptions', [])
+    if not descriptions:
+        return jsonify({})
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    result = {}
+
+    for desc in descriptions:
+        cur.execute('''
+            SELECT t.id, t.amount, t.reimbursement_amount,
+                   ts.person_name, ts.share_amount
+            FROM transactions t
+            JOIN transaction_shares ts ON ts.transaction_id = t.id
+            WHERE t.description = ? AND t.is_shared = 1 AND t.payer = 'Me'
+            ORDER BY t.date DESC
+        ''', (desc,))
+        rows = cur.fetchall()
+
+        if not rows:
+            result[desc] = None
+            continue
+
+        txn_map = {}
+        for r in rows:
+            tid = r['id']
+            if tid not in txn_map:
+                txn_map[tid] = {'amount': r['amount'], 'shares': []}
+            txn_map[tid]['shares'].append({
+                'person_name': r['person_name'],
+                'share_amount': r['share_amount']
+            })
+
+        txns = list(txn_map.values())
+        amounts = [t['amount'] for t in txns]
+        amount_consistent = len(set(amounts)) == 1
+        most_recent = txns[0]
+
+        result[desc] = {
+            'amount_consistent': amount_consistent,
+            'most_recent_amount': most_recent['amount'],
+            'shares': most_recent['shares'],
+        }
+
+    conn.close()
+    return jsonify(result)
+
 @app.route('/api/plaid/lookup-profiles', methods=['POST'])
 def plaid_lookup_profiles():
     """
@@ -874,6 +977,39 @@ def plaid_lookup_profiles():
     return jsonify(result)
 
 
+def _filter_internal_transfers(candidates):
+    """Remove internal transfer pairs from import candidates.
+
+    Each rule is a (side_a_desc, side_b_desc) tuple. Both sides of a matched
+    pair have amounts that sum to zero and dates within 5 days of each other.
+
+    Known pairs:
+      - Venmo "Standard transfer" ↔ CapOne "Venmo" (moving cash to checking)
+      - CapOne "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile" (monthly bill pay)
+    """
+    from datetime import date as date_type
+
+    TRANSFER_PAIRS = [
+        ('standard transfer', 'venmo'),
+        ('chase credit crd',  'payment thank you-mobile'),
+    ]
+
+    to_remove = set()
+    for desc_a, desc_b in TRANSFER_PAIRS:
+        side_a = [t for t in candidates if t['description'].lower() == desc_a]
+        side_b = [t for t in candidates if t['description'].lower() == desc_b]
+        for ta in side_a:
+            for tb in side_b:
+                if abs(ta['amount'] + tb['amount']) < 0.01:
+                    date_a = date_type.fromisoformat(ta['date'])
+                    date_b = date_type.fromisoformat(tb['date'])
+                    if abs((date_a - date_b).days) <= 5:
+                        to_remove.add(ta['plaid_transaction_id'])
+                        to_remove.add(tb['plaid_transaction_id'])
+
+    return [t for t in candidates if t['plaid_transaction_id'] not in to_remove]
+
+
 @app.route('/api/plaid/fetch-transactions', methods=['POST'])
 def plaid_fetch_transactions():
     """
@@ -910,6 +1046,8 @@ def plaid_fetch_transactions():
                     t['card_name'] = acct['account_name']
                     t['institution_name'] = acct['institution_name']
                     candidates.append(t)
+
+        candidates = _filter_internal_transfers(candidates)
 
         # Sort newest first so the most recent transactions are at the top
         candidates.sort(key=lambda x: x['date'], reverse=True)
@@ -985,6 +1123,22 @@ def plaid_import_transactions():
                             INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id)
                             VALUES (?, ?)
                         ''', (new_id, tag_id))
+
+                # Apply shared split if any
+                resolved_shares = t.get('resolved_shares')
+                if new_id and resolved_shares:
+                    cur.execute('UPDATE transactions SET is_shared = 1, payer = ? WHERE id = ?', ('Me', new_id))
+                    cur.execute('DELETE FROM transaction_shares WHERE transaction_id = ?', (new_id,))
+                    total_reimbursement = 0
+                    for share in resolved_shares:
+                        amt = float(share.get('share_amount', 0))
+                        total_reimbursement += amt
+                        cur.execute(
+                            'INSERT INTO transaction_shares (transaction_id, person_name, share_amount) VALUES (?, ?, ?)',
+                            (new_id, share.get('person_name'), amt)
+                        )
+                    cur.execute('UPDATE transactions SET reimbursement_amount = ? WHERE id = ?',
+                                (total_reimbursement, new_id))
 
             except Exception:
                 pass

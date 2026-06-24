@@ -11,8 +11,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import plaid
 from plaid.api import plaid_api
+from plaid.configuration import Configuration, Environment
+from plaid.api_client import ApiClient
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
@@ -24,22 +25,15 @@ from plaid.model.products import Products
 
 def _get_client():
     env_name = os.getenv('PLAID_ENV', 'sandbox').lower()
-
-    # The current plaid-python SDK only exposes Sandbox and Production.
-    # Plaid's development trial uses the Production host with the production secret.
-    if env_name in ('production', 'development'):
-        host = plaid.Environment.Production
-    else:
-        host = plaid.Environment.Sandbox
-
-    configuration = plaid.Configuration(
+    host = Environment.Production if env_name in ('production', 'development') else Environment.Sandbox
+    configuration = Configuration(
         host=host,
         api_key={
             'clientId': os.getenv('PLAID_CLIENT_ID'),
             'secret': os.getenv('PLAID_SECRET'),
         }
     )
-    return plaid_api.PlaidApi(plaid.ApiClient(configuration))
+    return plaid_api.PlaidApi(ApiClient(configuration))
 
 
 def create_link_token(user_id='budget-tracker-user'):

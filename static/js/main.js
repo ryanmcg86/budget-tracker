@@ -605,7 +605,7 @@ async function openTab(evt, tabId) {
     if (targetBtn) targetBtn.classList.add("active");
 }
 
-let breakdownChartRange = '1y'; // Default chart range
+let breakdownChartRange = '6m'; // Default chart range
 
 function setBreakdownChartRange(event, range) {
     breakdownChartRange = range;
@@ -642,7 +642,8 @@ async function loadBreakdownView() {
     `).join('');
 
     // Auto-load the saved default view for this category
-    loadTagDefaults(); 
+    loadTagDefaults();
+    loadSavedViews();
 }
 
 async function setBreakdownViewMode(mode) {
@@ -697,24 +698,50 @@ async function loadBreakdownData() {
     const response = await fetch(`/api/breakdown-report?${params.toString()}`);
     const data = await response.json();
 
-    // Render Transaction List Table and Calculate Total
+    // Render Transaction List Table grouped by month
     let grandTotal = 0;
     if (data.table && data.table.length > 0) {
-        tableBody.innerHTML = data.table.map(row => {
-            grandTotal += row.display_amount;
-            return `
-                <tr>
-                    <td style="white-space: nowrap;">${formatDate(row.date)}</td>
-                    <td>
-                        <div style="font-weight: 600;">${row.description}</div>
-                        ${renderTxnTags(row)}
-                    </td>
-                    <td style="text-align:right; font-weight:700; white-space: nowrap;">$${row.display_amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+        // Group rows by YYYY-MM, preserving DESC order from the server
+        const byMonth = {};
+        const monthOrder = [];
+        data.table.forEach(row => {
+            const key = row.date.substring(0, 7);
+            if (!byMonth[key]) { byMonth[key] = []; monthOrder.push(key); }
+            byMonth[key].push(row);
+        });
+
+        let html = '';
+        monthOrder.forEach(key => {
+            const rows = byMonth[key];
+            const [yr, mo] = key.split('-');
+            const monthLabel = new Date(parseInt(yr), parseInt(mo) - 1, 1)
+                .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            const monthTotal = rows.reduce((sum, r) => sum + r.display_amount, 0);
+            grandTotal += monthTotal;
+
+            // Month separator row
+            html += `
+                <tr style="border-top: 3px solid #2c3e50; background: #2c3e50;">
+                    <td colspan="2" style="font-weight:700; padding:7px 10px; color:#fff; font-size:0.88em; letter-spacing:0.03em;">${monthLabel}</td>
+                    <td style="text-align:right; font-weight:700; padding:7px 10px; color:#fff; white-space:nowrap;">$${monthTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                 </tr>
             `;
-        }).join('');
 
-        // Add the footer
+            rows.forEach(row => {
+                html += `
+                    <tr>
+                        <td style="white-space: nowrap;">${formatDate(row.date)}</td>
+                        <td>
+                            <div style="font-weight: 600;">${row.description}</div>
+                            ${renderTxnTags(row)}
+                        </td>
+                        <td style="text-align:right; font-weight:700; white-space: nowrap;">$${row.display_amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                    </tr>
+                `;
+            });
+        });
+
+        tableBody.innerHTML = html;
         tableBody.innerHTML += `
             <tfoot style="border-top: 2px solid #333; font-weight: bold; background: #f8f9fa;">
                 <tr><td>TOTAL</td><td colspan="2" style="text-align:right;">$${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
@@ -1084,7 +1111,8 @@ function renderFilteredTable(data) {
                         <div style="font-size:0.85em; color:#666;">${txn.merchant || ''}</div>
                         ${renderTxnTags(txn)}
                     </td>
-                    <td>${txn.bank_category || 'Payment'}</td>
+                    <td>${txn.category || ''}</td>
+                    <td>${txn.bank_category || ''}</td>
                     <td><span class="${getAccountClass(txn.card_name)}">${txn.card_name}</span></td>
                     <td style="text-align: center;">${txn.is_shared == 1 ? '✓' : ''}</td>
                     <td style="color: #27ae60; font-weight:700;">+$${Math.abs(txn.amount).toFixed(2)}</td>
@@ -2030,9 +2058,191 @@ function plaidSelectAll(checked) {
     document.querySelectorAll('.plaid-candidate-check').forEach(cb => cb.checked = checked);
 }
 
-// Conflict resolution state — one pending conflict resolved at a time via the modal
-let _conflictQueue = [];
-let _conflictResolve = null; // Promise resolver for the current modal
+// Shared split modal state
+let _splitResolve = null;
+
+function addSplitPersonRow(personName = '', shareAmount = '') {
+    const container = document.getElementById('splitPersonRows');
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:8px;';
+    row.innerHTML = `
+        <input type="text" placeholder="Person's name" value="${personName}"
+               style="flex:2; padding:9px; border:1px solid #ddd; border-radius:6px; font-size:0.9em;">
+        <span style="color:#888;">owes $</span>
+        <input type="number" placeholder="0.00" value="${shareAmount}" min="0" step="0.01"
+               style="flex:1; padding:9px; border:1px solid #ddd; border-radius:6px; font-size:0.9em;">
+        <button onclick="this.parentElement.remove()" style="background:none; border:none; color:#e74c3c; font-size:1.2em; cursor:pointer; padding:0 4px;">×</button>
+    `;
+    container.appendChild(row);
+}
+
+function resolveSharedSplit(apply) {
+    document.getElementById('sharedSplitModal').style.display = 'none';
+    if (!_splitResolve) return;
+
+    if (!apply) {
+        _splitResolve(null);
+        _splitResolve = null;
+        return;
+    }
+
+    const rows = document.querySelectorAll('#splitPersonRows > div');
+    const shares = [];
+    rows.forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        const name = inputs[0].value.trim();
+        const amount = parseFloat(inputs[1].value);
+        if (name && !isNaN(amount) && amount > 0) {
+            shares.push({ person_name: name, share_amount: amount });
+        }
+    });
+
+    _splitResolve(shares.length ? shares : null);
+    _splitResolve = null;
+}
+
+function showSharedSplitModal(description, newAmount, profile) {
+    return new Promise(resolve => {
+        _splitResolve = resolve;
+
+        document.getElementById('splitModalDesc').textContent = `"${description}"`;
+        document.getElementById('splitPersonRows').innerHTML = '';
+
+        const amountMatch = profile && Math.abs(profile.most_recent_amount - newAmount) < 0.01;
+
+        let subText;
+        if (!profile) {
+            subText = `No previous split found for this transaction ($${newAmount.toFixed(2)}). Enter the split below, or click "Not shared".`;
+        } else if (amountMatch) {
+            subText = `Previously split at the same amount ($${newAmount.toFixed(2)}). The suggested split is pre-filled — adjust if needed.`;
+        } else {
+            subText = `Previously shared at $${profile.most_recent_amount.toFixed(2)}, but this charge is $${newAmount.toFixed(2)}. Confirm the split below.`;
+        }
+        document.getElementById('splitModalSub').textContent = subText;
+
+        if (profile) {
+            // Pre-fill with previous shares; if amount changed, scale proportionally
+            profile.shares.forEach(s => {
+                let suggestedAmount = s.share_amount;
+                if (!amountMatch && profile.most_recent_amount > 0) {
+                    // Scale the share proportionally to the new total
+                    suggestedAmount = parseFloat(((s.share_amount / profile.most_recent_amount) * newAmount).toFixed(2));
+                }
+                addSplitPersonRow(s.person_name, suggestedAmount);
+            });
+        } else {
+            addSplitPersonRow(); // blank row to start
+        }
+
+        document.getElementById('sharedSplitModal').style.display = 'block';
+    });
+}
+
+async function importSelectedPlaidTransactions() {
+    const checked = Array.from(document.querySelectorAll('.plaid-candidate-check:checked'))
+        .map(cb => plaidCandidates[parseInt(cb.dataset.index)]);
+
+    if (!checked.length) { alert('No transactions selected.'); return; }
+
+    const status = document.getElementById('plaidImportStatus');
+    const uniqueDescs = [...new Set(checked.map(t => t.description))];
+
+    // 1. Category + tags profile lookup
+    status.textContent = 'Looking up profiles…';
+    console.log('[import] step 1: category profiles for', uniqueDescs);
+    const profileRes = await fetch('/api/plaid/lookup-profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descriptions: uniqueDescs })
+    });
+    const profiles = await profileRes.json();
+    console.log('[import] step 1 done:', profiles);
+
+    // 2. Shared split profile lookup
+    console.log('[import] step 2: shared profiles');
+    const sharedRes = await fetch('/api/plaid/lookup-shared-profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descriptions: uniqueDescs })
+    });
+    const sharedProfiles = await sharedRes.json();
+    console.log('[import] step 2 done:', sharedProfiles);
+
+    // 3. Resolve category/tag conflicts
+    console.log('[import] step 3: category conflict resolution');
+    const resolvedProfiles = {};
+    for (const desc of uniqueDescs) {
+        const profile = profiles[desc];
+        if (!profile || profile.status === 'none') {
+            resolvedProfiles[desc] = null;
+        } else if (profile.status === 'unique') {
+            resolvedProfiles[desc] = { category: profile.category, tags: profile.tags };
+        } else {
+            status.textContent = 'Resolving category conflicts…';
+            console.log('[import] step 3: conflict modal for', desc);
+            resolvedProfiles[desc] = await showConflictModal(desc, profile.options);
+            console.log('[import] step 3: resolved', desc, '->', resolvedProfiles[desc]);
+        }
+    }
+    console.log('[import] step 3 done');
+
+    // 4. Resolve shared splits
+    console.log('[import] step 4: shared split resolution');
+    const resolvedShares = {};
+    const resolvedSharesById = {};
+    const descGroups = {};
+    checked.forEach(t => {
+        if (!descGroups[t.description]) descGroups[t.description] = [];
+        descGroups[t.description].push(t);
+    });
+
+    for (const desc of uniqueDescs) {
+        const sharedProfile = sharedProfiles[desc];
+        if (!sharedProfile) { console.log('[import] step 4: no shared history for', desc); continue; }
+
+        const group = descGroups[desc];
+        const uniqueAmounts = [...new Set(group.map(t => t.amount))];
+        console.log('[import] step 4: split modal for', desc, 'amounts:', uniqueAmounts);
+
+        for (const amount of uniqueAmounts) {
+            status.textContent = 'Reviewing shared splits…';
+            const shares = await showSharedSplitModal(desc, amount, sharedProfile);
+            console.log('[import] step 4: resolved split for', desc, amount, '->', shares);
+            group.filter(t => t.amount === amount).forEach(t => {
+                resolvedSharesById[t.plaid_transaction_id] = shares;
+            });
+        }
+    }
+    console.log('[import] step 4 done');
+
+    // 5. Enrich each transaction with resolved data
+    const enriched = checked.map(t => ({
+        ...t,
+        category: resolvedProfiles[t.description]?.category || '',
+        resolved_tags: resolvedProfiles[t.description]?.tags || [],
+        resolved_shares: resolvedSharesById[t.plaid_transaction_id] || null,
+    }));
+
+    status.textContent = 'Importing…';
+
+    const res = await fetch('/api/plaid/import-transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactions: enriched })
+    });
+    const data = await res.json();
+
+    if (data.error) { status.textContent = 'Error: ' + data.error; return; }
+
+    status.textContent = `✓ ${data.inserted} transaction${data.inserted !== 1 ? 's' : ''} imported.`;
+
+    const importedIds = new Set(checked.map(t => t.plaid_transaction_id));
+    plaidCandidates = plaidCandidates.filter(t => !importedIds.has(t.plaid_transaction_id));
+    renderPlaidCandidates();
+
+    await loadFullTransactions();
+    loadSummary();
+}
 
 function resolveConflict(choice) {
     document.getElementById('profileConflictModal').style.display = 'none';
@@ -2073,72 +2283,97 @@ function showConflictModal(description, options) {
     });
 }
 
-async function importSelectedPlaidTransactions() {
-    const checked = Array.from(document.querySelectorAll('.plaid-candidate-check:checked'))
-        .map(cb => plaidCandidates[parseInt(cb.dataset.index)]);
 
-    if (!checked.length) { alert('No transactions selected.'); return; }
+//---------------------------------------------------------------
+// Saved Breakdown Views
+//---------------------------------------------------------------
 
-    const status = document.getElementById('plaidImportStatus');
-    status.textContent = 'Looking up profiles…';
+let _savedBreakdownViews = [];
 
-    // 1. Fetch profiles for all unique descriptions in the selection
-    const uniqueDescs = [...new Set(checked.map(t => t.description))];
-    const profileRes = await fetch('/api/plaid/lookup-profiles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ descriptions: uniqueDescs })
-    });
-    const profiles = await profileRes.json();
+async function loadSavedViews() {
+    const res = await fetch('/api/breakdown-views');
+    _savedBreakdownViews = await res.json();
+    renderSavedViews();
+}
 
-    // 2. Resolve any conflicts one at a time via modal, then auto-assign the rest
-    const resolvedProfiles = {}; // description -> {category, tags} or null
-
-    for (const desc of uniqueDescs) {
-        const profile = profiles[desc];
-        if (!profile || profile.status === 'none') {
-            resolvedProfiles[desc] = null;
-        } else if (profile.status === 'unique') {
-            resolvedProfiles[desc] = { category: profile.category, tags: profile.tags };
-        } else if (profile.status === 'conflict') {
-            // Show modal and wait for user choice
-            status.textContent = `Resolving conflicts…`;
-            resolvedProfiles[desc] = await showConflictModal(desc, profile.options);
-        }
-    }
-
-    // 3. Apply resolved profiles to each transaction before sending to backend
-    const enriched = checked.map(t => {
-        const profile = resolvedProfiles[t.description];
-        return {
-            ...t,
-            category: profile?.category || '',
-            resolved_tags: profile?.tags || [],
-        };
-    });
-
-    status.textContent = 'Importing…';
-
-    const res = await fetch('/api/plaid/import-transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactions: enriched })
-    });
-    const data = await res.json();
-
-    if (data.error) {
-        status.textContent = 'Error: ' + data.error;
+function renderSavedViews() {
+    const category = document.getElementById('breakdownCategory').value;
+    const views = _savedBreakdownViews.filter(v => v.category === category);
+    const container = document.getElementById('savedViewsList');
+    if (!views.length) {
+        container.innerHTML = '<span style="font-size:0.8em; color:#bbb; font-style:italic;">No saved views yet.</span>';
         return;
     }
+    container.innerHTML = views.map(v => `
+        <div style="display:flex; align-items:center; gap:6px; padding:7px 10px; background:#f8f0ff;
+                    border:1px solid #d0b8f5; border-radius:6px; cursor:pointer;"
+             onclick="applyBreakdownView(${v.id})">
+            <span style="flex:1; font-size:0.85em; font-weight:600; color:#4c2aa6;
+                         overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                  title="${v.name}">${v.name}</span>
+            <button onclick="event.stopPropagation(); deleteSavedView(${v.id})"
+                    style="background:none; border:none; color:#e74c3c; cursor:pointer;
+                           font-size:1.1em; line-height:1; padding:0 2px; flex-shrink:0;">×</button>
+        </div>
+    `).join('');
+}
 
-    status.textContent = `✓ ${data.inserted} transaction${data.inserted !== 1 ? 's' : ''} imported.`;
+async function saveCurrentBreakdownView() {
+    const name = window.prompt('Name this view:');
+    if (!name || !name.trim()) return;
 
-    const importedIds = new Set(checked.map(t => t.plaid_transaction_id));
-    plaidCandidates = plaidCandidates.filter(t => !importedIds.has(t.plaid_transaction_id));
-    renderPlaidCandidates();
+    const category = document.getElementById('breakdownCategory').value;
+    const tagIds = JSON.stringify(
+        Array.from(document.querySelectorAll('.breakdown-tag-check:checked')).map(i => parseInt(i.value))
+    );
 
-    await loadFullTransactions();
-    loadSummary();
+    const res = await fetch('/api/breakdown-views', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), category, tag_ids: tagIds,
+                               view_mode: currentViewMode, time_range: breakdownChartRange })
+    });
+    if (res.ok) await loadSavedViews();
+    else alert('Failed to save view.');
+}
+
+async function applyBreakdownView(viewId) {
+    const view = _savedBreakdownViews.find(v => v.id === viewId);
+    if (!view) return;
+
+    // Category
+    document.getElementById('breakdownCategory').value = view.category;
+
+    // View mode
+    currentViewMode = view.view_mode;
+    document.getElementById('btnBreakdownGross').classList.toggle('active', view.view_mode === 'gross');
+    document.getElementById('btnBreakdownNet').classList.toggle('active', view.view_mode === 'net');
+
+    // Time range
+    breakdownChartRange = view.time_range;
+    document.querySelectorAll('#detailedBreakdowns .chart-time-controls .time-btn').forEach(btn => {
+        const m = btn.getAttribute('onclick').match(/'(\w+)'\)/);
+        btn.classList.toggle('active', m && m[1] === view.time_range);
+    });
+
+    // Tags
+    const tagsRes = await fetch('/api/tags');
+    const tags = await tagsRes.json();
+    const savedIds = JSON.parse(view.tag_ids);
+    document.getElementById('tagCheckboxes').innerHTML = tags.map(t => `
+        <label style="font-size: 0.9em; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer;">
+            <input type="checkbox" class="breakdown-tag-check" value="${t.id}" onchange="loadBreakdownData()"
+                   ${savedIds.includes(t.id) ? 'checked' : ''}> ${t.name}
+        </label>
+    `).join('');
+
+    loadBreakdownData();
+}
+
+async function deleteSavedView(id) {
+    if (!confirm('Delete this saved view?')) return;
+    await fetch(`/api/breakdown-views/${id}`, { method: 'DELETE' });
+    await loadSavedViews();
 }
 
 //---------------------------------------------------------------
