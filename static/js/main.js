@@ -641,6 +641,9 @@ async function loadBreakdownView() {
         </label>
     `).join('');
 
+    // Clear comparison selection when the category changes
+    activeComparisonViews.clear();
+
     // Auto-load the saved default view for this category
     loadTagDefaults();
     loadSavedViews();
@@ -678,6 +681,11 @@ async function loadTagDefaults() {
 }
 
 async function loadBreakdownData() {
+    if (activeComparisonViews.size > 0) {
+        await loadComparisonData();
+        return;
+    }
+
     const year = document.getElementById('breakdownYear').value;
     const month = document.getElementById('breakdownMonth').value;
     const category = document.getElementById('breakdownCategory').value;
@@ -2311,7 +2319,9 @@ function showSharedSplitModal(description, newAmount, profile) {
 // Saved Breakdown Views
 //---------------------------------------------------------------
 
+const COMPARISON_COLORS = ['#667eea', '#e74c3c', '#27ae60', '#f39c12', '#8e44ad', '#16a085'];
 let _savedBreakdownViews = [];
+let activeComparisonViews = new Map(); // viewId -> color
 
 async function loadSavedViews() {
     const res = await fetch('/api/breakdown-views');
@@ -2327,18 +2337,39 @@ function renderSavedViews() {
         container.innerHTML = '<span style="font-size:0.8em; color:#bbb; font-style:italic;">No saved views yet.</span>';
         return;
     }
-    container.innerHTML = views.map(v => `
-        <div style="display:flex; align-items:center; gap:6px; padding:7px 10px; background:#f8f0ff;
-                    border:1px solid #d0b8f5; border-radius:6px; cursor:pointer;"
-             onclick="applyBreakdownView(${v.id})">
-            <span style="flex:1; font-size:0.85em; font-weight:600; color:#4c2aa6;
-                         overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
-                  title="${v.name}">${v.name}</span>
-            <button onclick="event.stopPropagation(); deleteSavedView(${v.id})"
-                    style="background:none; border:none; color:#e74c3c; cursor:pointer;
-                           font-size:1.1em; line-height:1; padding:0 2px; flex-shrink:0;">×</button>
-        </div>
-    `).join('');
+    container.innerHTML = views.map(v => {
+        const color = activeComparisonViews.get(v.id);
+        const isActive = !!color;
+        return `
+            <div style="display:flex; align-items:center; gap:8px; padding:7px 10px;
+                        background:${isActive ? color + '18' : '#f8f0ff'};
+                        border:2px solid ${isActive ? color : '#d0b8f5'};
+                        border-radius:6px; cursor:pointer;"
+                 onclick="toggleComparisonView(${v.id})">
+                <div style="width:12px; height:12px; border-radius:50%; flex-shrink:0;
+                            background:${isActive ? color : '#ccc'};
+                            border:2px solid ${isActive ? color : '#aaa'};"></div>
+                <span style="flex:1; font-size:0.85em; font-weight:600;
+                             color:${isActive ? '#222' : '#4c2aa6'};
+                             overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                      title="${v.name}">${v.name}</span>
+                <button onclick="event.stopPropagation(); deleteSavedView(${v.id})"
+                        style="background:none; border:none; color:#e74c3c; cursor:pointer;
+                               font-size:1.1em; line-height:1; padding:0 2px; flex-shrink:0;">×</button>
+            </div>
+        `;
+    }).join('');
+}
+
+function toggleComparisonView(viewId) {
+    if (activeComparisonViews.has(viewId)) {
+        activeComparisonViews.delete(viewId);
+    } else {
+        const color = COMPARISON_COLORS[activeComparisonViews.size % COMPARISON_COLORS.length];
+        activeComparisonViews.set(viewId, color);
+    }
+    renderSavedViews();
+    loadBreakdownData();
 }
 
 async function saveCurrentBreakdownView() {
@@ -2360,43 +2391,126 @@ async function saveCurrentBreakdownView() {
     else alert('Failed to save view.');
 }
 
-async function applyBreakdownView(viewId) {
-    const view = _savedBreakdownViews.find(v => v.id === viewId);
-    if (!view) return;
-
-    // Category
-    document.getElementById('breakdownCategory').value = view.category;
-
-    // View mode
-    currentViewMode = view.view_mode;
-    document.getElementById('btnBreakdownGross').classList.toggle('active', view.view_mode === 'gross');
-    document.getElementById('btnBreakdownNet').classList.toggle('active', view.view_mode === 'net');
-
-    // Time range
-    breakdownChartRange = view.time_range;
-    document.querySelectorAll('#detailedBreakdowns .chart-time-controls .time-btn').forEach(btn => {
-        const m = btn.getAttribute('onclick').match(/'(\w+)'\)/);
-        btn.classList.toggle('active', m && m[1] === view.time_range);
-    });
-
-    // Tags
-    const tagsRes = await fetch('/api/tags');
-    const tags = await tagsRes.json();
-    const savedIds = JSON.parse(view.tag_ids);
-    document.getElementById('tagCheckboxes').innerHTML = tags.map(t => `
-        <label style="font-size: 0.9em; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer;">
-            <input type="checkbox" class="breakdown-tag-check" value="${t.id}" onchange="loadBreakdownData()"
-                   ${savedIds.includes(t.id) ? 'checked' : ''}> ${t.name}
-        </label>
-    `).join('');
-
+async function deleteSavedView(id) {
+    if (!confirm('Delete this saved view?')) return;
+    activeComparisonViews.delete(id);
+    await fetch(`/api/breakdown-views/${id}`, { method: 'DELETE' });
+    await loadSavedViews();
     loadBreakdownData();
 }
 
-async function deleteSavedView(id) {
-    if (!confirm('Delete this saved view?')) return;
-    await fetch(`/api/breakdown-views/${id}`, { method: 'DELETE' });
-    await loadSavedViews();
+async function loadComparisonData() {
+    const year = document.getElementById('breakdownYear').value;
+    const month = document.getElementById('breakdownMonth').value;
+
+    const results = await Promise.all(
+        Array.from(activeComparisonViews.entries()).map(async ([viewId, color]) => {
+            const view = _savedBreakdownViews.find(v => v.id === viewId);
+            if (!view) return null;
+            const tagIds = JSON.parse(view.tag_ids);
+            const params = new URLSearchParams({
+                year, month,
+                category: view.category,
+                view_mode: view.view_mode,
+                time_range: view.time_range,
+            });
+            tagIds.forEach(id => params.append('tag_ids', id));
+            const res = await fetch(`/api/breakdown-report?${params.toString()}`);
+            const data = await res.json();
+            return { view, color, data };
+        })
+    );
+
+    const valid = results.filter(Boolean);
+    renderComparisonChart(valid);
+    renderComparisonTable(valid);
+}
+
+function renderComparisonChart(results) {
+    const traces = results.map(({ view, color, data }) => ({
+        x: data.graph.map(g => g.month),
+        y: data.graph.map(g => g.total),
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: view.name,
+        line: { color, width: 3 },
+        fill: 'tozeroy',
+        fillcolor: color + '18',
+        hovertemplate: `<b>${view.name}</b><br>%{x}<br>$%{y:,.2f}<extra></extra>`
+    }));
+
+    Plotly.newPlot('breakdownHistoryChart', traces, {
+        xaxis: { title: 'Month' },
+        yaxis: { title: 'Total Spend ($)', tickprefix: '$' },
+        margin: { t: 30, b: 80, l: 60, r: 20 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        showlegend: true,
+        legend: { orientation: 'h', x: 0, y: -0.3 }
+    }, { responsive: true, displayModeBar: false });
+}
+
+function renderComparisonTable(results) {
+    const tableBody = document.getElementById('breakdownTableBody');
+
+    // Flatten all rows, tagging each with its view name and color
+    const allRows = [];
+    results.forEach(({ view, color, data }) => {
+        (data.table || []).forEach(row => allRows.push({ ...row, _viewName: view.name, _color: color }));
+    });
+
+    if (!allRows.length) {
+        tableBody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:20px; color:#888;">No transactions found for the selected views.</td></tr>';
+        return;
+    }
+
+    // Sort newest first, then group by month
+    allRows.sort((a, b) => b.date.localeCompare(a.date));
+    const byMonth = {};
+    const monthOrder = [];
+    allRows.forEach(row => {
+        const key = row.date.substring(0, 7);
+        if (!byMonth[key]) { byMonth[key] = []; monthOrder.push(key); }
+        byMonth[key].push(row);
+    });
+
+    let html = '';
+    let grandTotal = 0;
+    monthOrder.forEach(key => {
+        const rows = byMonth[key];
+        const [yr, mo] = key.split('-');
+        const monthLabel = new Date(parseInt(yr), parseInt(mo) - 1, 1)
+            .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        const monthTotal = rows.reduce((sum, r) => sum + r.display_amount, 0);
+        grandTotal += monthTotal;
+
+        html += `
+            <tr style="border-top:3px solid #2c3e50; background:#2c3e50;">
+                <td colspan="2" style="font-weight:700; padding:7px 10px; color:#fff; font-size:0.88em;">${monthLabel}</td>
+                <td style="text-align:right; font-weight:700; padding:7px 10px; color:#fff; white-space:nowrap;">$${monthTotal.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+            </tr>
+        `;
+        rows.forEach(row => {
+            html += `
+                <tr style="border-left:4px solid ${row._color}; background:${row._color}12;">
+                    <td style="white-space:nowrap;">${formatDate(row.date)}</td>
+                    <td>
+                        <div style="font-weight:600;">${row.description}</div>
+                        <div style="font-size:0.78em; font-weight:700; color:${row._color}; margin-top:2px;">${row._viewName}</div>
+                        ${renderTxnTags(row)}
+                    </td>
+                    <td style="text-align:right; font-weight:700; white-space:nowrap;">$${row.display_amount.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                </tr>
+            `;
+        });
+    });
+
+    tableBody.innerHTML = html;
+    tableBody.innerHTML += `
+        <tfoot style="border-top:2px solid #333; font-weight:bold; background:#f8f9fa;">
+            <tr><td>TOTAL</td><td colspan="2" style="text-align:right;">$${grandTotal.toLocaleString(undefined, {minimumFractionDigits:2})}</td></tr>
+        </tfoot>
+    `;
 }
 
 function resolveConflict(choice) {
