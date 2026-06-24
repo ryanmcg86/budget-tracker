@@ -672,11 +672,16 @@ async function loadTagDefaults() {
     const category = document.getElementById('breakdownCategory').value;
     const response = await fetch(`/api/tag-defaults?category=${category}`);
     const defaultIds = await response.json();
-    
+
     const checks = document.querySelectorAll('.breakdown-tag-check');
     checks.forEach(c => {
         c.checked = defaultIds.includes(parseInt(c.value));
     });
+    loadBreakdownData();
+}
+
+function deselectAllTags() {
+    document.querySelectorAll('.breakdown-tag-check').forEach(c => c.checked = false);
     loadBreakdownData();
 }
 
@@ -2385,7 +2390,7 @@ async function saveCurrentBreakdownView() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), category, tag_ids: tagIds,
-                               view_mode: currentViewMode, time_range: breakdownChartRange })
+                               view_mode: 'net', time_range: '6m' })
     });
     if (res.ok) await loadSavedViews();
     else alert('Failed to save view.');
@@ -2411,8 +2416,8 @@ async function loadComparisonData() {
             const params = new URLSearchParams({
                 year, month,
                 category: view.category,
-                view_mode: view.view_mode,
-                time_range: view.time_range,
+                view_mode: currentViewMode,
+                time_range: breakdownChartRange,
             });
             tagIds.forEach(id => params.append('tag_ids', id));
             const res = await fetch(`/api/breakdown-report?${params.toString()}`);
