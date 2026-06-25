@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>💰 Budget Tracker</h1>
+            <h1>Budget Tracker</h1>
             <nav class="tab-nav">
                 <button class="tab-btn active" onclick="openTab(event, 'overview')">Overview</button>
                 <!-- <button class="tab-btn" onclick="openTab(event, 'rules')">Rules</button> -->
@@ -62,65 +62,38 @@
             <!-- Row 1: Monthly -->
             <div class="overview-row">
                 <div class="table-container">
-                    <h3>Monthly: <span id="displayMonth"></span></h3>
-                    <table id="monthlyTable">
-                        <thead><tr><th>Category</th><th>Amount</th></tr></thead>
-                        <tbody></tbody>
-                        <tfoot style="border-top: 2px solid #444; font-weight: bold;">
-                            <tr>
-                                <td>TOTAL</td>
-                                <td id="monthlyTotalVal">$0.00</td>
-                            </tr>
-                        </tfoot>
-                    </table>
-
+                    <div class="breakdown-head">
+                        <h3>Monthly: <span id="displayMonth"></span></h3>
+                        <span class="breakdown-total" id="monthlyTotalVal">$0.00</span>
+                    </div>
+                    <div class="category-bars" id="monthlyTable"></div>
                 </div>
-                <div class="chart-container">
-                    <div id="monthlyChart"></div>
-                </div>
+                <div class="insight-panel" id="monthlyInsight"></div>
             </div>
         
 
             <!-- Row 2: Yearly Total -->
             <div class="overview-row">
                 <div class="table-container">
-                    <h3>Yearly Total (<span id="displayYear"></span>)</h3>
-                    <table id="yearlyTable">
-                        <thead><tr><th>Category</th><th>Total</th></tr></thead>
-                        <tbody></tbody>
-                        <tfoot style="border-top: 2px solid #444; font-weight: bold;">
-                            <tr>
-                                <td>TOTAL</td>
-                                <td id="yearlyTotalVal">$0.00</td>
-                            </tr>
-                        </tfoot>
-                    </table>
-
+                    <div class="breakdown-head">
+                        <h3>Yearly Total (<span id="displayYear"></span>)</h3>
+                        <span class="breakdown-total" id="yearlyTotalVal">$0.00</span>
+                    </div>
+                    <div class="category-bars" id="yearlyTable"></div>
                 </div>
-                <div class="chart-container">
-                    <div id="yearlyChart"></div>
-                </div>
+                <div class="insight-panel" id="yearlyInsight"></div>
             </div>
 
             <!-- Row 3: Yearly Average -->
             <div class="overview-row">
                 <div class="table-container">
-                    <h3>Yearly Average</h3>
-                    <table id="averageTable">
-                        <thead><tr><th>Category</th><th>Avg/Mo</th></tr></thead>
-                        <tbody></tbody>
-                        <tfoot style="border-top: 2px solid #444; font-weight: bold;">
-                            <tr>
-                                <td>TOTAL AVG</td>
-                                <td id="avgTotalVal">$0.00</td>
-                            </tr>
-                        </tfoot>
-                    </table>
-
+                    <div class="breakdown-head">
+                        <h3>Yearly Average</h3>
+                        <span class="breakdown-total" id="avgTotalVal">$0.00</span>
+                    </div>
+                    <div class="category-bars" id="averageTable"></div>
                 </div>
-                <div class="chart-container">
-                    <div id="averageChart"></div>
-                </div>
+                <div class="insight-panel" id="averageInsight"></div>
             </div> <!-- Close Row 3 -->
         </div> <!-- CLOSE OVERVIEW TAB -->
 
@@ -446,6 +419,7 @@
                         <div style="display: flex; gap: 8px;">
                             <button class="toggle-btn" onclick="plaidSelectAll(true)">Select All</button>
                             <button class="toggle-btn" onclick="plaidSelectAll(false)">Deselect All</button>
+                            <button class="toggle-btn" onclick="moveToFiltered()" style="background: #e74c3c; color: white;">Filter</button>
                         </div>
                     </div>
                     <div class="table-scroll-container" style="max-height: 450px;">
@@ -466,6 +440,31 @@
                     <div style="margin-top: 15px; display: flex; align-items: center; gap: 15px;">
                         <button class="btn-add" onclick="importSelectedPlaidTransactions()" style="background: #43e97b; color: #1a6b3a;">Import Selected</button>
                         <span id="plaidImportStatus" style="font-size: 0.9em; color: #666;"></span>
+                    </div>
+                </div>
+
+                <!-- Filtered-out transactions -->
+                <div id="plaidFilteredOutSection" style="display: none; margin-top: 30px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h3 style="font-size: 1em; color: #555; margin: 0;">
+                            Filtered Out
+                            <span id="plaidFilteredOutCount" style="color: #e74c3c; margin-left: 8px;"></span>
+                        </h3>
+                    </div>
+                    <div class="table-scroll-container" style="max-height: 300px;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Description</th>
+                                    <th>Account</th>
+                                    <th>Bank Category</th>
+                                    <th style="text-align: right;">Amount</th>
+                                    <th style="text-align: center;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="plaidFilteredOutBody"></tbody>
+                        </table>
                     </div>
                 </div>
 

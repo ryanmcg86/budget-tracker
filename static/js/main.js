@@ -205,18 +205,19 @@ async function loadSummary() {
         const response = await fetch(`/api/detailed-summary?year=${year}&month=${month}`);
         const data = await response.json();
         
-        // Pass the correct keys from the backend response
-        updateOverviewTable('monthlyTable', data.month_totals);
-        updateOverviewTable('yearlyTable', data.year_totals);
-        updateOverviewTable('averageTable', data.year_averages);
+        // Pass the correct keys from the backend response.
+        // Each render is isolated so one failing section can't blank the rest of the dashboard.
+        const safe = (fn, label) => { try { fn(); } catch (e) { console.error('Overview render failed:', label, e); } };
 
-        // Pie charts for each section
-        renderPieChart('monthlyChart', data.month_totals);
-        renderPieChart('yearlyChart', data.year_totals);
-        renderPieChart('averageChart', data.year_averages);
+        safe(() => updateOverviewTable('monthlyTable', data.month_totals), 'monthlyTable');
+        safe(() => updateOverviewTable('yearlyTable',  data.year_totals),   'yearlyTable');
+        safe(() => updateOverviewTable('averageTable', data.year_averages), 'averageTable');
+
+        // Context panels beside each table (replaces the old per-table charts)
+        safe(() => loadOverviewInsights(), 'overviewInsights');
 
         // Update the Monthly Spending Trend bar chart
-        loadOverviewHistoryChart();
+        safe(() => loadOverviewHistoryChart(), 'overviewHistory');
     } catch (error) {
         console.error('Error loading summary:', error);
     }
@@ -248,76 +249,69 @@ async function loadOverviewHistoryChart() {
         const data = await response.json();
 
         // Same palette used by the pie charts, so a category's color stays consistent across the page
-        const colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#6dd5ed', '#2193b0'];
+        const colors = ['#34A77B', '#5B9BD5', '#D2A859', '#9B7BD0', '#E0795F', '#4FB6A8', '#D27FB0', '#8FB04F', '#7E8AA0', '#C2596B'];
 
-        // One bar trace per category; Plotly stacks them and lets you hover each segment individually
+        // Helper: hex -> rgba with alpha, for translucent stacked-area fills
+        const hexA = (hex, a) => {
+            const h = hex.replace('#', '');
+            const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
+            return `rgba(${r}, ${g}, ${b}, ${a})`;
+        };
+
+        // One stacked-area band per category; Plotly stacks them into one flowing shape
         const visibleTraces = TRACKED_CATEGORIES
             .map((cat, i) => ({
                 x: data.months,
                 y: data.categories[cat] || [],
                 name: cat,
-                type: 'bar',
-                marker: { color: colors[i % colors.length] },
-                hovertemplate: `<b>${cat}</b><br>%{x}<br>$%{y:,.2f}<extra></extra>`
+                type: 'scatter',
+                mode: 'lines',
+                stackgroup: 'one',
+                line: { width: 0.8, color: colors[i % colors.length] },
+                fillcolor: hexA(colors[i % colors.length], 0.82),
+                hoverinfo: 'skip'
             }))
             .filter(trace => trace.y.some(v => Math.abs(v) > 0.01));
 
-        // Compute per-month totals for the annotation labels on top of each bar
+        // Per-month totals -> a single invisible trace that carries the hover tooltip,
+        // so hovering a month shows just the total spend (not every category).
         const monthTotals = data.months.map((_, mi) =>
             TRACKED_CATEGORIES.reduce((sum, cat) => sum + (data.categories[cat]?.[mi] || 0), 0)
         );
-
-        // Invisible scatter trace that carries the total labels above each bar
-        const totalLabels = {
+        const totalTrace = {
             x: data.months,
             y: monthTotals,
             type: 'scatter',
-            mode: 'text',
-            text: monthTotals.map(v => `$${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`),
-            textposition: 'top center',
-            textfont: { size: 11, color: '#444', family: 'sans-serif' },
-            hoverinfo: 'skip',
+            mode: 'lines',
+            line: { width: 0 },
+            hovertemplate: 'Total spent: <b>$%{y:,.2f}</b><extra></extra>',
             showlegend: false
         };
 
-        // Average line across all months in the current range
-        const avg = monthTotals.reduce((a, b) => a + b, 0) / (monthTotals.length || 1);
-        const avgLine = {
-            x: data.months,
-            y: Array(data.months.length).fill(avg),
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Average',
-            line: { color: '#e74c3c', width: 2, dash: 'dot' },
-            hovertemplate: `<b>Average</b><br>$${avg.toLocaleString('en-US', { maximumFractionDigits: 0 })}<extra></extra>`
-        };
-
-        const chartData = [...visibleTraces, avgLine, totalLabels];
+        const chartData = [...visibleTraces, totalTrace];
 
         const layout = {
-            barmode: 'stack',
-            xaxis: { title: 'Month' },
+            font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
+            xaxis: { title: 'Month', tickfont: { color: '#A2A7B0' }, gridcolor: 'rgba(0,0,0,0)', linecolor: '#565C66' },
             yaxis: {
                 title: 'Total Spend ($)',
                 tickprefix: '$',
-                // give a bit of headroom above the tallest bar so labels don't get clipped
-                range: [0, Math.max(...monthTotals) * 1.15]
+                tickfont: { color: '#A2A7B0' },
+                gridcolor: '#4D535D',
+                zerolinecolor: '#565C66',
+                rangemode: 'tozero'
             },
-            margin: { t: 30, b: 80, l: 60, r: 20 },
+            margin: { t: 20, b: 80, l: 60, r: 20 },
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
+            hovermode: 'x unified',
+            hoverlabel: {
+                bgcolor: '#2C3037',
+                bordercolor: '#565C66',
+                font: { color: '#F3F4F5', family: 'Schibsted Grotesk, sans-serif', size: 13 }
+            },
             showlegend: true,
-            legend: { orientation: 'h', x: 0, y: -0.3 },
-            annotations: [{
-                x: data.months[data.months.length - 1],
-                y: avg,
-                xanchor: 'left',
-                yanchor: 'middle',
-                xshift: 8,
-                text: `Avg $${avg.toLocaleString('en-US', { maximumFractionDigits: 0 })}`,
-                showarrow: false,
-                font: { color: '#e74c3c', size: 11 }
-            }]
+            legend: { orientation: 'h', x: 0, y: -0.3, font: { color: '#C9CDD3' } }
         };
 
         Plotly.newPlot('overviewHistoryChart', chartData, layout, { responsive: true, displayModeBar: false });
@@ -364,17 +358,18 @@ async function loadTransactions() {
 function renderPieChart(divId, dataMap) {
     const chartDiv = document.getElementById(divId);
     if (!chartDiv) return;
+    const map = dataMap || {};   // tolerate a missing/undefined section without throwing
 
     const categories = TRACKED_CATEGORIES.filter(cat => {
-        const entry = dataMap[cat] || { gross: 0, net: 0 };
-        const amount = (typeof entry === 'object') ? 
+        const entry = map[cat] || { gross: 0, net: 0 };
+        const amount = (entry && typeof entry === 'object') ? 
             ((currentViewMode === 'gross') ? entry.gross : entry.net) : entry;
         return Math.abs(amount) > 0.01; // Filter out tiny amounts for cleaner charts
     });
 
     const values = categories.map(cat => {
-        const entry = dataMap[cat] || { gross: 0, net: 0 };
-        const amount = (typeof entry === 'object') ? 
+        const entry = map[cat] || { gross: 0, net: 0 };
+        const amount = (entry && typeof entry === 'object') ? 
             ((currentViewMode === 'gross') ? entry.gross : entry.net) : entry;
         return Math.abs(amount || 0);
     });
@@ -384,27 +379,182 @@ function renderPieChart(divId, dataMap) {
         return;
     }
 
+    const maxV = Math.max(...values);
     const chartData = [{
-        values: values,
-        labels: categories,
-        type: 'pie',
-        hole: 0.4,
-        textinfo: 'percent',
+        x: categories,
+        y: values,
+        type: 'bar',
         marker: {
-            colors: ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#6dd5ed', '#2193b0']
+            color: values.map(v => `rgba(52, 167, 123, ${(0.42 + 0.55 * (v / maxV)).toFixed(2)})`)
         },
-        // NEW: This is the hover template to format the numbers
-        hovertemplate: '<b>%{label}</b><br>$%{value:,.2f}<br>(%{percent})<extra></extra>'
+        hovertemplate: '<b>%{x}</b><br>$%{y:,.2f}<extra></extra>'
     }];
 
     const layout = {
         height: 350,
-        margin: { t: 10, b: 10, l: 10, r: 10 },
-        showlegend: true,
-        legend: { orientation: 'h', x: 0, y: -0.1 }
+        margin: { t: 16, b: 95, l: 58, r: 16 },
+        showlegend: false,
+        font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        bargap: 0.35,
+        xaxis: { tickangle: -40, tickfont: { color: '#A2A7B0', size: 11 }, gridcolor: 'rgba(0,0,0,0)' },
+        yaxis: { tickprefix: '$', tickfont: { color: '#A2A7B0', size: 11 }, gridcolor: '#4D535D', zerolinecolor: '#565C66' }
     };
 
     Plotly.newPlot(divId, chartData, layout, {responsive: true, displayModeBar: false});
+}
+
+
+// Context panels beside the three Overview tables. Everything is computed from the
+// /api/overview-history series the app already loads — no backend change. Any comparison
+// that lacks history (e.g. no prior-year data) renders "—" instead of a misleading jump.
+async function loadOverviewInsights() {
+    const yearSelect = document.getElementById('yearSelect');
+    const monthSelect = document.getElementById('monthSelect');
+    if (!yearSelect || !monthSelect || !yearSelect.value) return;
+
+    const mMonthly = document.getElementById('monthlyInsight');
+    const mYearly  = document.getElementById('yearlyInsight');
+    const mAverage = document.getElementById('averageInsight');
+    if (!mMonthly) return;
+
+    try {
+        const year = yearSelect.value;
+        const month = monthSelect.value;
+        // Pull a wide window so year-over-year stats light up automatically once prior-year data exists.
+        const params = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: '5y' });
+        const res = await fetch(`/api/overview-history?${params.toString()}`);
+        const data = await res.json();
+        const months = data.months || [];
+        const cats = data.categories || {};
+        const n = months.length;
+        if (!n) return;
+
+        // ---- helpers ----
+        const MABBR = { Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12 };
+        const short = lbl => (lbl || '').split(' ')[0];
+        const mnum  = lbl => MABBR[short(lbl)] || 0;
+        const money0 = v => '$' + Math.round(v).toLocaleString('en-US');
+        const money2 = v => '$' + (v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const kAbbr  = v => Math.abs(v) >= 10000 ? '$' + (v / 1000).toFixed(1) + 'k' : money0(v);
+        const COLORS = ['#34A77B','#5B9BD5','#D2A859','#9B7BD0','#E0795F','#4FB6A8','#D27FB0','#8FB04F','#7E8AA0','#C2596B'];
+        const colorOf = c => COLORS[Math.max(0, TRACKED_CATEGORIES.indexOf(c)) % COLORS.length];
+
+        // per-month total; a zero month means "no data" (app has no history before its first record)
+        const totals = months.map((_, i) => TRACKED_CATEGORIES.reduce((s, c) => s + ((cats[c] && cats[c][i]) || 0), 0));
+        const hasData = totals.map(t => Math.abs(t) > 0.005);
+
+        // Spending: lower = good (green ↓), higher = bad (coral ↑). Returns "—" with no baseline.
+        const chip = (cur, base) => {
+            if (base == null || !(Math.abs(base) > 0.005)) return '<span class="ins-chip none">—</span>';
+            const pct = (cur - base) / base * 100;
+            const up = pct >= 0;
+            return `<span class="ins-chip ${up ? 'up' : 'down'}">${up ? '↑' : '↓'} ${Math.abs(pct).toFixed(1)}%</span>`;
+        };
+        const row = (label, val) => `<div class="ins-row"><span class="ins-label">${label}</span><span class="ins-val">${val}</span></div>`;
+
+        // ===== MONTHLY (selected month = last in window) =====
+        const L = n - 1;
+        const cur = totals[L];
+        const prev = (L - 1 >= 0 && hasData[L - 1]) ? totals[L - 1] : null;
+        const prior3 = [L - 1, L - 2, L - 3].filter(i => i >= 0 && hasData[i]);
+        const avg3 = prior3.length ? prior3.reduce((s, i) => s + totals[i], 0) / prior3.length : null;
+        const sameLY = (L - 12 >= 0 && hasData[L - 12]) ? totals[L - 12] : null;
+
+        const now = new Date();
+        const isCurrent = (parseInt(year) === now.getFullYear() && parseInt(month) === now.getMonth() + 1);
+        const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+        const daysElapsed = isCurrent ? Math.max(1, now.getDate()) : daysInMonth;
+        const dailyPace = cur / daysElapsed;
+
+        let mover = null, moverDiff = 0;
+        TRACKED_CATEGORIES.forEach(c => {
+            const ser = cats[c] || [];
+            const pr = prior3.map(i => ser[i] || 0);
+            if (!pr.length) return;
+            const cavg = pr.reduce((a, b) => a + b, 0) / pr.length;
+            const diff = (ser[L] || 0) - cavg;
+            if (Math.abs(diff) > Math.abs(moverDiff)) { moverDiff = diff; mover = c; }
+        });
+
+        let mSub;
+        if (prev != null) { const d = cur - prev; mSub = `${money0(Math.abs(d))} ${d < 0 ? 'less' : 'more'} than ${short(months[L - 1])}`; }
+        else { mSub = 'First recorded month'; }
+
+        mMonthly.innerHTML = `
+            <div class="ins-tag">vs. recent months</div>
+            <div class="ins-hero"><span class="ins-big">${money0(cur)}</span>${chip(cur, prev)}</div>
+            <div class="ins-sub">${mSub}</div>
+            <div class="ins-div"></div>
+            ${row('3-month average', avg3 != null ? money0(avg3) : '—')}
+            ${row('vs. same month last year', chip(cur, sameLY))}
+            ${row('Daily pace', money2(dailyPace))}
+            ${mover ? `<div class="ins-div"></div><div class="ins-tag">Biggest mover</div>
+            <div class="ins-row"><span class="ins-mover"><span class="ins-dot" style="background:${colorOf(mover)}"></span><span class="ins-label">${mover}</span></span><span class="ins-val ${moverDiff >= 0 ? 'neg' : 'pos'}">${moverDiff >= 0 ? '+' : '−'}${money0(Math.abs(moverDiff))} vs avg</span></div>` : ''}
+        `;
+
+        // ===== YEARLY TOTAL (selected year) =====
+        const yStr = String(year), lyStr = String(parseInt(year) - 1);
+        const tyIdx = months.map((m, i) => i).filter(i => months[i].endsWith(yStr) && hasData[i]);
+        const ytd = tyIdx.reduce((s, i) => s + totals[i], 0);
+        const monthsElapsed = tyIdx.length || 1;
+        const projection = ytd / monthsElapsed * 12;
+        const avgMonth = ytd / monthsElapsed;
+
+        const lyIdx = months.map((m, i) => i).filter(i => months[i].endsWith(lyStr) && hasData[i]);
+        const tyNums = tyIdx.map(i => mnum(months[i]));
+        const lySame = lyIdx.filter(i => tyNums.includes(mnum(months[i])));
+        const lyPaceTotal = (lySame.length === tyNums.length && lySame.length > 0) ? lySame.reduce((s, i) => s + totals[i], 0) : null;
+        const lyFull = lyIdx.length ? lyIdx.reduce((s, i) => s + totals[i], 0) : null;
+
+        const tyTotals = tyIdx.map(i => totals[i]);
+        const sparkMax = Math.max(...tyTotals, 1);
+        const spark = tyTotals.length
+            ? `<div class="ins-spark">${tyTotals.map((v, k) => `<span style="height:${Math.max(8, v / sparkMax * 100)}%;${k === tyTotals.length - 1 ? 'opacity:1;' : ''}"></span>`).join('')}</div>`
+            : '';
+
+        if (mYearly) mYearly.innerHTML = `
+            <div class="ins-tag">vs. last year &amp; pace</div>
+            <div class="ins-hero"><span class="ins-big">${kAbbr(ytd)}</span>${chip(ytd, lyPaceTotal)}</div>
+            <div class="ins-sub">${monthsElapsed} ${monthsElapsed === 1 ? 'month' : 'months'} recorded${lyPaceTotal != null ? ` · ${money0(Math.abs(ytd - lyPaceTotal))} ${ytd < lyPaceTotal ? 'under' : 'over'} last year's pace` : ''}</div>
+            <div class="ins-div"></div>
+            ${row('Full-year projection', '~' + kAbbr(projection))}
+            ${row('Last year', lyFull != null ? kAbbr(lyFull) : '—')}
+            ${row('Avg / month so far', money0(avgMonth))}
+            ${spark ? `<div class="ins-div"></div><div class="ins-tag">Spend by month</div>${spark}` : ''}
+        `;
+
+        // ===== YEARLY AVERAGE (selected year) =====
+        let hi = { v: -Infinity, l: '' }, lo = { v: Infinity, l: '' };
+        tyIdx.forEach(i => { if (totals[i] > hi.v) hi = { v: totals[i], l: months[i] }; if (totals[i] < lo.v) lo = { v: totals[i], l: months[i] }; });
+        let swing = null;
+        if (tyTotals.length >= 2) { let s = 0; for (let k = 1; k < tyTotals.length; k++) s += Math.abs(tyTotals[k] - tyTotals[k - 1]); swing = s / (tyTotals.length - 1); }
+
+        const cv = [];
+        TRACKED_CATEGORIES.forEach(c => {
+            const ser = tyIdx.map(i => (cats[c] && cats[c][i]) || 0);
+            const mean = ser.reduce((a, b) => a + b, 0) / (ser.length || 1);
+            if (mean < 1) return;
+            const variance = ser.reduce((a, b) => a + (b - mean) ** 2, 0) / ser.length;
+            cv.push({ c, v: Math.sqrt(variance) / mean });
+        });
+        cv.sort((a, b) => a.v - b.v);
+        const lyAvg = (lyFull != null && lyIdx.length) ? lyFull / lyIdx.length : null;
+
+        if (mAverage) mAverage.innerHTML = `
+            <div class="ins-tag">typical month, ${year}</div>
+            <div class="ins-hero"><span class="ins-big">${money0(avgMonth)}</span>${chip(avgMonth, lyAvg)}</div>
+            <div class="ins-sub">${lyAvg != null ? `${money0(Math.abs(avgMonth - lyAvg))} ${avgMonth < lyAvg ? 'lower' : 'higher'} than last year` : 'Per-month average across ' + monthsElapsed + ' ' + (monthsElapsed === 1 ? 'month' : 'months')}</div>
+            <div class="ins-div"></div>
+            ${row('Highest month', hi.l ? `${short(hi.l)} · ${money0(hi.v)}` : '—')}
+            ${row('Lowest month', lo.l ? `${short(lo.l)} · ${money0(lo.v)}` : '—')}
+            ${row('Month-to-month swing', swing != null ? '±' + money0(swing) : '—')}
+            ${cv.length ? `<div class="ins-div"></div><div class="ins-note">Most consistent: <b>${cv[0].c}</b> · Most variable: <b>${cv[cv.length - 1].c}</b></div>` : ''}
+        `;
+    } catch (e) {
+        console.error('Overview insights failed:', e);
+    }
 }
 
 
@@ -473,47 +623,57 @@ async function deleteTransaction(txnId) {
 }
 
 function updateOverviewTable(tableId, dataMap) {
-    const tbody = document.querySelector(`#${tableId} tbody`);
-    if (!tbody) return;
+    const container = document.getElementById(tableId);
+    if (!container) return;
+    const map = dataMap || {};   // tolerate a missing/undefined section without throwing
 
-    let grandTotal = 0;
-
-    tbody.innerHTML = TRACKED_CATEGORIES.map(cat => {
-        const entry = dataMap[cat] || { gross: 0, net: 0 };
-        
-        // 1. Pick the value based on the global toggle (gross or net)
-        // If it's the average table, dataMap might just be numbers, 
-        // so we handle both objects and raw numbers.
+    // 1. Resolve each category's amount (respecting the gross/net toggle).
+    //    Keep each category's index so its bar color stays consistent across the page.
+    const CATEGORY_COLORS = ['#34A77B', '#5B9BD5', '#D2A859', '#9B7BD0', '#E0795F', '#4FB6A8', '#D27FB0', '#8FB04F', '#7E8AA0', '#C2596B'];
+    const rows = TRACKED_CATEGORIES.map((cat, i) => {
+        const entry = map[cat] || { gross: 0, net: 0 };
         let amount = 0;
-        if (typeof entry === 'object') {
+        if (entry && typeof entry === 'object') {
             amount = (currentViewMode === 'gross') ? (entry.gross || 0) : (entry.net || 0);
         } else {
             amount = entry; // Fallback for simple number arrays
         }
-        
-        const absoluteAmount = Math.abs(amount);
-        grandTotal += absoluteAmount;
+        return { cat, amount: Math.abs(amount) || 0, color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] };
+    });
 
+    const grandTotal = rows.reduce((s, r) => s + r.amount, 0);
+    const maxAmount = Math.max(...rows.map(r => r.amount), 0);
+
+    // 2. Hide empty categories and sort biggest-spend first
+    const visible = rows.filter(r => r.amount > 0.005).sort((a, b) => b.amount - a.amount);
+
+    // 3. Render as a horizontal-bar breakdown (category · bar · amount · % of total)
+    container.innerHTML = visible.map(r => {
+        const pct = grandTotal > 0 ? (r.amount / grandTotal * 100) : 0;
+        const barPct = maxAmount > 0 ? (r.amount / maxAmount * 100) : 0;
+        const amtStr = r.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         return `
-            <tr>
-                <td>${cat}</td>
-                <td>$${absoluteAmount.toFixed(2)}</td>
-            </tr>
+            <div class="cat-row">
+                <div class="cat-name">${r.cat}</div>
+                <div class="cat-track"><div class="cat-fill" style="width:${barPct.toFixed(1)}%; background:${r.color};"></div></div>
+                <div class="cat-amount">$${amtStr}</div>
+                <div class="cat-pct">${Math.round(pct)}%</div>
+            </div>
         `;
-    }).join('');
+    }).join('') || '<div class="loading">No spending in this period</div>';
 
-    // 2. Update the corresponding footer value
+    // 4. Update the total shown in the section header
     const totalLabel = `$${grandTotal.toLocaleString(undefined, {
-        minimumFractionDigits: 2, 
+        minimumFractionDigits: 2,
         maximumFractionDigits: 2
     })}`;
-    
+
     if (tableId === 'monthlyTable') {
-        document.getElementById('monthlyTotalVal').textContent = totalLabel;
+        const el = document.getElementById('monthlyTotalVal'); if (el) el.textContent = totalLabel;
     } else if (tableId === 'yearlyTable') {
-        document.getElementById('yearlyTotalVal').textContent = totalLabel;
+        const el = document.getElementById('yearlyTotalVal'); if (el) el.textContent = totalLabel;
     } else if (tableId === 'averageTable') {
-        document.getElementById('avgTotalVal').textContent = totalLabel;
+        const el = document.getElementById('avgTotalVal'); if (el) el.textContent = totalLabel;
     }
 }
 
@@ -777,9 +937,9 @@ async function loadBreakdownData() {
             type: 'scatter', 
             mode: 'lines+markers',
             name: 'Spending',
-            line: {color: '#8e44ad', width: 3},
+            line: {color: '#34A77B', width: 3},
             fill: 'tozeroy', 
-            fillcolor: 'rgba(142, 68, 173, 0.1)',
+            fillcolor: 'rgba(52, 167, 123, 0.12)',
             hovertemplate: '<b>%{x}</b><br>$%{y:,.2f}<extra></extra>'
         },
         {
@@ -787,7 +947,7 @@ async function loadBreakdownData() {
             type: 'scatter',
             mode: 'lines',
             name: `Average ($${average.toFixed(2)})`,
-            line: {color: '#e74c3c', width: 2, dash: 'dash'},
+            line: {color: '#E87B61', width: 2, dash: 'dash'},
             hovertemplate: '<b>Average</b><br>$%{y:,.2f}<extra></extra>'
         }
     ];
@@ -795,15 +955,16 @@ async function loadBreakdownData() {
     const layout = {
         title: {
             text: `Spending Trend: ${category}`,
-            font: { size: 16 }
+            font: { size: 16, color: '#F3F4F5' }
         },
-        xaxis: { title: 'Month' },
-        yaxis: { title: 'Total Spend ($)', tickprefix: '$' },
+        font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
+        xaxis: { title: 'Month', tickfont: { color: '#A2A7B0' }, gridcolor: 'rgba(0,0,0,0)', linecolor: '#565C66' },
+        yaxis: { title: 'Total Spend ($)', tickprefix: '$', tickfont: { color: '#A2A7B0' }, gridcolor: '#4D535D', zerolinecolor: '#565C66' },
         margin: { t: 60, b: 80, l: 60, r: 20 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         showlegend: true,
-        legend: { orientation: 'h', x: 0, y: -0.2 }
+        legend: { orientation: 'h', x: 0, y: -0.2, font: { color: '#C9CDD3' } }
     };
 
     Plotly.newPlot('breakdownHistoryChart', chartData, layout, {responsive: true, displayModeBar: false});
@@ -1634,8 +1795,8 @@ async function loadSharedLedger() {
                         <td style="text-align: right; font-weight: bold; color: ${isPositive ? '#27ae60' : '#e74c3c'};">
                             ${isPositive ? '+' : '-'}$${Math.abs(row.share_change || row.net_change).toFixed(2)}
                         </td>
-                        <td style="text-align: right; font-weight: 700; background: #fcfcfc;">
-                            $${row.running_balance.toFixed(2)}
+                        <td style="text-align: right; font-weight: 700; color: ${row.running_balance >= 0 ? '#27ae60' : '#e74c3c'};">
+                            ${row.running_balance < 0 ? '-' : ''}$${Math.abs(row.running_balance).toFixed(2)}
                         </td>
                     </tr>
                 `;
@@ -1918,6 +2079,7 @@ window.onclick = function(event) {
 
 let plaidHandler = null;
 let plaidCandidates = [];
+let plaidFilteredOut = [];
 
 async function initPlaidLink() {
     // Fetch a fresh Link token from the backend and initialise the Plaid SDK
@@ -2024,7 +2186,8 @@ async function fetchPlaidCandidates() {
         const data = await res.json();
         if (data.error) { status.textContent = 'Error: ' + data.error; return; }
 
-        plaidCandidates = data;
+        plaidCandidates = data.candidates || [];
+        plaidFilteredOut = data.filtered_out || [];
         status.textContent = '';
         renderPlaidCandidates();
     } catch (e) {
@@ -2037,8 +2200,10 @@ function renderPlaidCandidates() {
     const body = document.getElementById('plaidCandidatesBody');
     const count = document.getElementById('plaidCandidateCount');
 
+    renderFilteredOutTable();
+
     if (!plaidCandidates.length) {
-        document.getElementById('plaidStatusMessage').textContent = 'No new transactions found.';
+        document.getElementById('plaidStatusMessage').textContent = plaidFilteredOut.length ? '' : 'No new transactions found.';
         section.style.display = 'none';
         return;
     }
@@ -2069,6 +2234,63 @@ function renderPlaidCandidates() {
 
 function plaidSelectAll(checked) {
     document.querySelectorAll('.plaid-candidate-check').forEach(cb => cb.checked = checked);
+}
+
+function moveToFiltered() {
+    const checked = Array.from(document.querySelectorAll('.plaid-candidate-check:checked'));
+    if (!checked.length) { alert('Select at least one transaction to filter out.'); return; }
+
+    const indicesToRemove = new Set(checked.map(cb => parseInt(cb.dataset.index)));
+    plaidFilteredOut = [...plaidFilteredOut, ...plaidCandidates.filter((_, i) => indicesToRemove.has(i))];
+    plaidCandidates = plaidCandidates.filter((_, i) => !indicesToRemove.has(i));
+
+    renderPlaidCandidates();
+}
+
+function moveBackToImportable(plaidId) {
+    const txn = plaidFilteredOut.find(t => t.plaid_transaction_id === plaidId);
+    if (!txn) return;
+
+    plaidFilteredOut = plaidFilteredOut.filter(t => t.plaid_transaction_id !== plaidId);
+    plaidCandidates = [txn, ...plaidCandidates].sort((a, b) => b.date.localeCompare(a.date));
+
+    renderPlaidCandidates();
+}
+
+function renderFilteredOutTable() {
+    const section = document.getElementById('plaidFilteredOutSection');
+    const body = document.getElementById('plaidFilteredOutBody');
+    const count = document.getElementById('plaidFilteredOutCount');
+
+    if (!plaidFilteredOut.length) {
+        section.style.display = 'none';
+        return;
+    }
+
+    count.textContent = `(${plaidFilteredOut.length})`;
+    body.innerHTML = plaidFilteredOut.map(t => {
+        const amount = parseFloat(t.amount);
+        const amountStr = `$${Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        const amountColor = amount < 0 ? '#27ae60' : '#e74c3c';
+        const amountLabel = amount < 0
+            ? `<span style="color:${amountColor}">+${amountStr}</span>`
+            : `<span style="color:${amountColor}">-${amountStr}</span>`;
+        return `
+            <tr>
+                <td>${t.date}</td>
+                <td>${t.description}</td>
+                <td style="font-size: 0.85em; color: #666;">${t.institution_name} — ${t.card_name}</td>
+                <td style="font-size: 0.85em; color: #888;">${t.bank_category || '—'}</td>
+                <td style="text-align: right;">${amountLabel}</td>
+                <td style="text-align: center;">
+                    <button onclick="moveBackToImportable('${t.plaid_transaction_id}')"
+                            class="toggle-btn" style="font-size: 0.8em; padding: 3px 8px;">Restore</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    section.style.display = 'block';
 }
 
 // Shared split modal state
@@ -2324,7 +2546,7 @@ function showSharedSplitModal(description, newAmount, profile) {
 // Saved Breakdown Views
 //---------------------------------------------------------------
 
-const COMPARISON_COLORS = ['#667eea', '#e74c3c', '#27ae60', '#f39c12', '#8e44ad', '#16a085'];
+const COMPARISON_COLORS = ['#5B9BD5', '#E0795F', '#D2A859', '#9B7BD0', '#4FB6A8', '#D27FB0'];
 let _savedBreakdownViews = [];
 let activeComparisonViews = new Map(); // viewId -> color
 
@@ -2453,19 +2675,20 @@ function renderComparisonChart(results) {
             type: 'scatter',
             mode: 'lines',
             name: `Average ($${average.toFixed(2)})`,
-            line: { color: '#e74c3c', width: 2, dash: 'dash' },
+            line: { color: '#E87B61', width: 2, dash: 'dash' },
             hovertemplate: '<b>Average</b><br>$%{y:,.2f}<extra></extra>'
         });
     }
 
     Plotly.newPlot('breakdownHistoryChart', traces, {
-        xaxis: { title: 'Month' },
-        yaxis: { title: 'Total Spend ($)', tickprefix: '$' },
+        font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
+        xaxis: { title: 'Month', tickfont: { color: '#A2A7B0' }, gridcolor: 'rgba(0,0,0,0)', linecolor: '#565C66' },
+        yaxis: { title: 'Total Spend ($)', tickprefix: '$', tickfont: { color: '#A2A7B0' }, gridcolor: '#4D535D', zerolinecolor: '#565C66' },
         margin: { t: 30, b: 80, l: 60, r: 20 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         showlegend: true,
-        legend: { orientation: 'h', x: 0, y: -0.3 }
+        legend: { orientation: 'h', x: 0, y: -0.3, font: { color: '#C9CDD3' } }
     }, { responsive: true, displayModeBar: false });
 }
 

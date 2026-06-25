@@ -1007,7 +1007,9 @@ def _filter_internal_transfers(candidates):
                         to_remove.add(ta['plaid_transaction_id'])
                         to_remove.add(tb['plaid_transaction_id'])
 
-    return [t for t in candidates if t['plaid_transaction_id'] not in to_remove]
+    kept = [t for t in candidates if t['plaid_transaction_id'] not in to_remove]
+    removed = [t for t in candidates if t['plaid_transaction_id'] in to_remove]
+    return kept, removed
 
 
 @app.route('/api/plaid/fetch-transactions', methods=['POST'])
@@ -1047,11 +1049,12 @@ def plaid_fetch_transactions():
                     t['institution_name'] = acct['institution_name']
                     candidates.append(t)
 
-        candidates = _filter_internal_transfers(candidates)
+        candidates, filtered_out = _filter_internal_transfers(candidates)
 
         # Sort newest first so the most recent transactions are at the top
         candidates.sort(key=lambda x: x['date'], reverse=True)
-        return jsonify(candidates)
+        filtered_out.sort(key=lambda x: x['date'], reverse=True)
+        return jsonify({'candidates': candidates, 'filtered_out': filtered_out})
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500

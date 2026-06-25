@@ -1,3 +1,36 @@
+/* ============================================================
+   Budget Tracker — Restyled
+   Sleek / professional fintech direction.
+   Drop-in replacement: targets the SAME selectors & IDs as before,
+   so all tables, tabs, filters, modals and JS hooks keep working.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+    color-scheme: dark;
+    --canvas: #3A3F47;          /* page background — light slate grey */
+    --card: #454B54;            /* container & cards (lifted for depth) */
+    --surface-2: #515862;       /* insets / subtle fills */
+    --field: #353A42;           /* form controls */
+    --ink: #F3F4F5;            /* primary text */
+    --muted: #BFC4CC;
+    --faint: #8E949E;
+    --border: #565C66;
+    --line: #4D535D;
+    --track: #565C66;
+    --accent: #34A77B;          /* emerald */
+    --accent-strong: #2C8E68;
+    --accent-soft: rgba(52, 167, 123, 0.18);
+    --pos: #4FCB8E;            /* income / credit */
+    --neg: #E87B61;            /* delete / negative */
+    --move: #6E93D0;           /* muted blue */
+    --edit: #D2A859;           /* muted amber */
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.22);
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -5,83 +38,146 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: 'Schibsted Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--canvas);
+    color: var(--ink);
     min-height: 100vh;
-    padding: 20px;
+    padding: 26px 22px 56px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 .container {
-    max-width: 1200px;
+    max-width: 1280px;
     margin: 0 auto;
-    background: white;
-    border-radius: 20px;
-    padding: 30px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 30px 32px 36px;
+    box-shadow: var(--shadow-card);
 }
 
+/* ---------- Header ---------- */
 header {
-    text-align: center;
-    margin-bottom: 40px;
-    padding-bottom: 20px;
-    border-bottom: 2px solid #f0f0f0;
+    text-align: left;
+    margin-bottom: 30px;
+    padding-bottom: 0;
+    border-bottom: none;
 }
 
 h1 {
-    color: #333;
-    font-size: 2.5em;
-    margin-bottom: 10px;
+    color: var(--ink);
+    font-size: 1.55em;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin-bottom: 18px;
 }
 
 .subtitle {
-    color: #666;
-    font-size: 1.1em;
+    color: var(--muted);
+    font-size: 0.95em;
 }
 
 h2 {
-    color: #444;
-    margin-bottom: 20px;
-    font-size: 1.5em;
+    color: var(--ink);
+    margin-bottom: 18px;
+    font-size: 1.25em;
+    font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
+h3 {
+    color: var(--ink);
+    font-size: 1.02em;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+h4 {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+/* ---------- Tab navigation ---------- */
+.tab-nav {
+    display: inline-flex;
+    justify-content: flex-start;
+    gap: 3px;
+    background: var(--canvas);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    margin-bottom: 0;
+    padding: 4px;
+}
+
+.tab-btn {
+    padding: 8px 16px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 500;
+    font-size: 0.86em;
+    color: var(--muted);
+    border-radius: 8px;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.tab-btn:hover {
+    color: var(--ink);
+}
+
+.tab-btn.active {
+    background: var(--accent);
+    border-radius: 8px;
+    color: #fff;
+    box-shadow: none;
+}
+
+/* ---------- Summary / hero card ---------- */
 .summary-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+    background: var(--accent) !important;
+    color: #fff;
     padding: 25px;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
 }
 
 .summary-card h3 {
-    font-size: 0.9em;
-    opacity: 0.9;
+    font-size: 0.82em;
+    color: rgba(255, 255, 255, 0.82);
+    letter-spacing: 0.04em;
     margin-bottom: 10px;
     font-weight: 500;
 }
 
 .summary-card .amount {
+    font-family: var(--mono);
     font-size: 2em;
-    font-weight: 700;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
 }
 
 .summary-card .detail {
     font-size: 0.85em;
-    opacity: 0.8;
+    opacity: 0.85;
     margin-top: 8px;
 }
 
-/* Category Section */
+/* ---------- Category / generic section ---------- */
 .category-section {
-    background: #f8f9fa;
-    padding: 30px;
-    border-radius: 12px;
+    background: var(--canvas);
+    padding: 28px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
 }
 
 #categoryChart {
     min-height: 400px;
 }
 
-/* Transactions List */
+/* ---------- Compact transactions list (dashboard) ---------- */
 .transactions-list {
     max-height: 600px;
     overflow-y: auto;
@@ -91,13 +187,13 @@ h2 {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 15px;
-    border-bottom: 1px solid #e0e0e0;
-    transition: background 0.2s ease;
+    padding: 14px 4px;
+    border-bottom: 1px solid var(--line);
+    transition: background 0.15s ease;
 }
 
 .transaction-item:hover {
-    background: #f8f9fa;
+    background: var(--canvas);
 }
 
 .transaction-item:last-child {
@@ -109,449 +205,641 @@ h2 {
 }
 
 .transaction-description {
-    font-weight: 600;
-    color: #333;
-    margin-bottom: 5px;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 4px;
 }
 
 .transaction-meta {
-    font-size: 0.85em;
-    color: #666;
+    font-size: 0.82em;
+    color: var(--faint);
 }
 
 .transaction-amount {
-    font-size: 1.2em;
-    font-weight: 700;
-    color: #764ba2;
+    font-family: var(--mono);
+    font-size: 1.05em;
+    font-weight: 500;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
 }
 
 .transaction-category {
     display: inline-block;
-    background: #e0e7ff;
-    color: #4c51bf;
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 0.8em;
+    background: var(--canvas);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.76em;
+    font-weight: 500;
     margin-left: 10px;
 }
 
 .loading {
     text-align: center;
-    color: #999;
+    color: var(--faint);
     padding: 40px;
-    font-style: italic;
+    font-style: normal;
 }
 
-/* Mobile Responsive */
-@media (max-width: 768px) {
-    body {
-        padding: 10px;
-    }
-    
-    .container {
-        padding: 20px;
-    }
-    
-    h1 {
-        font-size: 2em;
-    }
-    
-    .file-input-wrapper {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    
-    .btn-primary {
-        width: 100%;
-    }
-    
-    .transaction-item {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-    }
-    
-    .summary-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-.transaction-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
-}
-
-.btn-delete {
-    background: #ff4d4d;
-    color: white;
-    border: none;
-    padding: 5px 12px;
-    border-radius: 6px;
-    font-size: 0.75em;
+/* ---------- View-mode / time toggles ---------- */
+.toggle-btn {
+    padding: 7px 15px;
+    border: 1px solid var(--border);
+    background: var(--card);
     cursor: pointer;
-    transition: background 0.2s;
-}
-
-.btn-delete:hover {
-    background: #cc0000;
-}
-
-/* Adjust the transaction item for better mobile spacing */
-@media (max-width: 768px) {
-    .transaction-right {
-        flex-direction: row;
-        justify-content: space-between;
-        width: 100%;
-        align-items: center;
-        margin-top: 10px;
-        padding-top: 10px;
-        border-top: 1px dashed #eee;
-    }
-}
-
-.tab-nav {
-    display: flex;
-    justify-content: space-around;
-    background: #f1f1f1;
-    border-radius: 10px;
-    margin-bottom: 20px;
-    padding: 5px;
-}
-
-.tab-btn {
-    padding: 10px 20px;
-    border: none;
-    background: none;
-    cursor: pointer;
-    font-weight: bold;
-    color: #666;
-}
-
-.tab-btn.active {
-    background: white;
+    font-family: inherit;
     border-radius: 8px;
-    color: #764ba2;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    font-size: 0.84em;
+    font-weight: 500;
+    color: var(--muted);
+    transition: all 0.15s ease;
+}
+.toggle-btn:hover { color: var(--ink); }
+.toggle-btn.active {
+    background: var(--accent) !important;
+    color: #fff !important;
+    border-color: var(--accent) !important;
 }
 
+.chart-time-controls .time-btn {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    cursor: pointer;
+    font-family: inherit;
+    border-radius: 8px;
+    font-size: 0.8em;
+    font-weight: 500;
+    color: var(--muted);
+    margin-left: 5px;
+    transition: all 0.15s ease;
+}
+.chart-time-controls .time-btn.active {
+    background: var(--accent) !important;
+    color: #fff !important;
+    border-color: var(--accent) !important;
+}
+
+/* ---------- Overview layout ---------- */
 .overview-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
+    gap: 16px;
     margin-top: 20px;
 }
 
-.table-container {
-    background: #fff;
-    border: 1px solid #eee;
-    border-radius: 8px;
-    padding: 15px;
+.overview-row {
+    display: flex;
+    gap: 22px;
+    margin-bottom: 32px;
+    align-items: flex-start;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 28px;
 }
+.overview-row:last-child { border-bottom: none; }
+
+.overview-row .table-container {
+    flex: 1;
+}
+
+.overview-row .chart-container {
+    flex: 1;
+    min-height: 350px;
+}
+
+.chart-container {
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+    background: var(--card);
+}
+
+/* ---------- Tables ---------- */
+.table-container {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+}
+
+/* ---------- Category breakdown (bar list) ---------- */
+.breakdown-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+}
+.breakdown-head h3 { margin: 0; }
+.breakdown-total {
+    font-family: var(--mono);
+    font-size: 0.95em;
+    font-weight: 600;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.category-bars {
+    border-top: 1px solid var(--line);
+    margin-top: 12px;
+    padding-top: 4px;
+}
+.cat-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 9px 0;
+}
+.cat-name {
+    width: 108px;
+    flex-shrink: 0;
+    font-size: 0.85em;
+    font-weight: 500;
+    color: var(--ink);
+}
+.cat-track {
+    flex: 1;
+    height: 8px;
+    background: var(--surface-2);
+    border-radius: 999px;
+    overflow: hidden;
+}
+.cat-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+}
+.cat-amount {
+    width: 92px;
+    flex-shrink: 0;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 0.82em;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+.cat-pct {
+    width: 40px;
+    flex-shrink: 0;
+    text-align: right;
+    font-size: 0.78em;
+    color: var(--faint);
+}
+
+@media (max-width: 768px) {
+    .cat-name { width: 84px; }
+    .cat-amount { width: 78px; }
+}
+
+/* ---------- Overview insight panels (replace per-table charts) ---------- */
+.overview-row .insight-panel { flex: 1; }
+.insight-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+    align-self: stretch;
+}
+.ins-tag { font-size: 0.66em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); }
+.ins-hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ins-big { font-family: var(--mono); font-size: 1.9em; font-weight: 500; letter-spacing: -0.02em; }
+.ins-chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 0.72em; font-weight: 600; padding: 3px 8px; border-radius: 7px; white-space: nowrap; flex-shrink: 0; }
+.ins-chip.down { color: var(--pos); background: rgba(79,203,142,0.14); }
+.ins-chip.up { color: var(--neg); background: rgba(232,123,97,0.14); }
+.ins-chip.none { color: var(--faint); background: var(--surface-2); }
+.ins-sub { font-size: 0.8em; color: var(--muted); margin-top: -4px; }
+.ins-div { height: 1px; background: var(--line); }
+.ins-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ins-label { font-size: 0.84em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ins-val { font-family: var(--mono); font-size: 0.86em; font-weight: 500; color: var(--ink); white-space: nowrap; flex-shrink: 0; }
+.ins-val.pos { color: var(--pos); }
+.ins-val.neg { color: var(--neg); }
+.ins-mover { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ins-dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+.ins-spark { display: flex; align-items: flex-end; gap: 4px; height: 40px; }
+.ins-spark span { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.45; min-height: 3px; }
+.ins-note { font-size: 0.78em; color: var(--faint); line-height: 1.5; }
+.ins-note b { color: var(--muted); font-weight: 600; }
 
 table {
     width: 100%;
     border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
 }
 
-th { text-align: left; color: #888; font-size: 0.8em; padding-bottom: 10px; }
-td { padding: 8px 0; border-bottom: 1px solid #f9f9f9; }
-
-@media (max-width: 768px) {
-    .overview-grid { grid-template-columns: 1fr; } /* Stack tables on iPhone */
+th {
+    text-align: left;
+    color: var(--faint);
+    font-size: 0.74em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 8px;
+    padding-bottom: 10px;
 }
 
-/* Hide all tab content by default */
-.tab-content {
-    display: none;
-    animation: fadeIn 0.3s ease;
+td {
+    padding: 11px 8px;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    font-size: 0.9em;
 }
 
-/* Show the active tab */
-.tab-content.active {
-    display: block;
+tbody tr:last-child td { border-bottom: none; }
+
+tbody tr { transition: background 0.12s ease; }
+tbody tr:hover { background: var(--canvas); }
+
+tfoot td {
+    font-weight: 600;
+    color: var(--ink);
 }
 
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+/* numeric / money emphasis */
+#monthlyTotalVal, #yearlyTotalVal, #avgTotalVal,
+#expenseTotalValue, #paymentTotalValue, #netBalanceVal,
+.amount {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
 }
 
+#monthlyTable td:last-child, #yearlyTable td:last-child, #averageTable td:last-child,
+#fullTransactionsTable td:last-child, #paymentsTable td:last-child,
+#unifiedLedgerTable td:nth-last-child(-n+2), #breakdownTable td:last-child,
+tfoot td:last-child {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+tfoot {
+    border-top: 1.5px solid var(--ink) !important;
+}
+
+/* ---------- Full transactions / payments tables ---------- */
+#fullTransactionsTable, #paymentsTable {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+#fullTransactionsTable th, #paymentsTable th {
+    background: var(--card);
+    padding: 10px 8px;
+    text-align: left;
+}
+
+#fullTransactionsTable td, #paymentsTable td {
+    padding: 12px 8px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+}
+
+/* Right-align last two columns, center the action ones */
+th:nth-last-child(-n+2),
+td:nth-last-child(-n+2) {
+    text-align: center;
+}
+
+/* ---------- Scroll containers ---------- */
+.table-scroll-container {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-top: 10px;
+}
+
+.table-scroll-container thead th {
+    position: sticky;
+    top: 0;
+    background-color: var(--card);
+    z-index: 10;
+    box-shadow: 0 1px 0 var(--border);
+}
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #3a3d44; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #4a4e56; }
+
+/* ---------- Filters ---------- */
 .filter-grid {
     display: grid;
     grid-template-columns: repeat(6, 1fr);
-    gap: 15px;
-    background: #f8f9fa;
-    padding: 15px;
-    border-radius: 8px;
+    gap: 12px;
+    background: var(--canvas);
+    border: 1px solid var(--border);
+    padding: 16px;
+    border-radius: 12px;
 }
 
 .filter-grid select {
     width: 100%;
     padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    background-color: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background-color: var(--card);
+    font-family: inherit;
+    font-size: 0.9em;
+    color: var(--ink);
 }
 
-/* Mobile: Stack them on iPhone */
-@media (max-width: 768px) {
-    .filter-grid {
-        grid-template-columns: 1fr; /* One dropdown per line on mobile */
-    }
-    
-    .date-filters {
-        flex-direction: row; /* Keep Year and Month side-by-side even on mobile */
-    }
+.filter-section h3 { margin-bottom: 14px; }
+
+/* ---------- Form inputs (global) ---------- */
+select, input[type="text"], input[type="number"], input[type="date"], input[type="file"] {
+    font-family: inherit;
+    color: var(--ink);
 }
 
-
-#fullTransactionsTable {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 10px;
+select:focus, input:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-#fullTransactionsTable th {
-    background: #eee;
-    padding: 12px;
-    text-align: left;
+input[type="checkbox"] {
+    cursor: pointer;
+    transform: scale(1.15);
+    accent-color: var(--accent);
 }
 
-#fullTransactionsTable td {
-    padding: 12px;
-    border-bottom: 1px solid #eee;
-}
-
-@media (max-width: 768px) {
-    .filter-grid {
-        grid-template-columns: 1fr; /* Stack filters on iPhone */
-    }
-}
-
+/* ---------- Rule form ---------- */
 .rule-form {
     display: flex;
     gap: 10px;
-    flex-wrap: wrap; /* Allows it to stack on smaller screens */
+    flex-wrap: wrap;
     margin-bottom: 20px;
 }
 
 .rule-form input, .rule-form select {
     padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    flex: 1; /* Makes them grow to fill space */
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    flex: 1;
     min-width: 150px;
+    background: var(--card);
 }
 
-/* Unified Button Base Styles for Toolbar Actions */
+/* ---------- Buttons (action toolbar) ---------- */
 .btn-move, .btn-delete, .btn-edit, .btn-add {
     display: inline-block;
-    color: white !important;
+    color: #fff !important;
     border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    font-size: 0.85em;
+    padding: 9px 16px;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.84em;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
     text-align: center;
-    transition: opacity 0.2s;
+    transition: filter 0.15s ease, opacity 0.15s ease;
     min-width: 90px;
 }
 
-.btn-move {
-    background: #3498db; /* Blue */
-}
-
-.btn-delete {
-    background: #e74c3c; /* Red */
-}
+.btn-add  { background: var(--accent) !important; }
+.btn-move { background: var(--move) !important; }
+.btn-delete { background: var(--neg) !important; }
+.btn-edit { background: var(--edit) !important; }
 
 .btn-move:hover, .btn-delete:hover, .btn-edit:hover, .btn-add:hover {
-    opacity: 0.8;
+    opacity: 1;
+    filter: brightness(1.06);
+}
+.btn-edit:hover { background: var(--edit) !important; }
+
+/* primary / submit buttons */
+.btn-primary {
+    display: inline-block;
+    background: var(--accent) !important;
+    color: #fff !important;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 22px;
+    font-family: inherit;
+    font-size: 0.88em;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+.btn-primary:hover { filter: brightness(1.06); }
+
+/* file upload label */
+.file-label {
+    display: inline-block;
+    background: var(--surface-2);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 0.88em;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: filter 0.15s ease, border-color 0.15s ease;
+}
+.file-label:hover { border-color: var(--accent); }
+
+.file-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.file-input-wrapper input[type="file"] { display: none; }
+.file-name { color: var(--faint); font-size: 0.9em; }
+
+/* generic unclassed buttons (modal cancel, small links) */
+.modal-content button:not(.btn-primary):not(.btn-add):not(.btn-move):not(.btn-delete):not(.btn-edit) {
+    font-family: inherit;
+    background: var(--canvas);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 8px;
 }
 
-/* Table Alignment */
-th, td {
-    text-align: left;
-    padding: 12px 8px;
-}
+/* ---------- Status / hero overrides for inline colors ---------- */
+#expenseTotalContainer { color: var(--accent) !important; }
+#paymentTotalContainer { color: var(--pos) !important; }
 
-/* Right-align numeric columns and center-align action columns */
-th:nth-last-child(-n+2), 
-td:nth-last-child(-n+2) {
+/* ---------- Account tags (muted, neutral) ---------- */
+.tag-account,
+.tag-chase, .tag-capone, .tag-venmo, .tag-other {
+    display: inline-block;
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 0.78em;
+    font-weight: 600;
+    color: var(--muted) !important;
+    background-color: var(--canvas) !important;
+    border: 1px solid var(--border) !important;
+    border-left: 1px solid var(--border) !important;
+    border-bottom: 1px solid var(--border) !important;
     text-align: center;
+    min-width: 84px;
+    font-style: normal !important;
 }
 
-/* Mobile specific styling for buttons */
+/* ---------- Modals ---------- */
+.modal-content, [id$="Modal"] > div {
+    background-color: var(--card) !important;
+    border: 1px solid var(--border);
+    border-radius: 16px !important;
+    box-shadow: 0 24px 60px rgba(20, 22, 26, 0.22);
+}
+
+.modal-content h3 { color: var(--ink) !important; }
+
+/* ---------- Bulk-actions toolbar ---------- */
+.bulk-actions-toolbar {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+}
+
+/* ---------- Animations ---------- */
+.tab-content {
+    display: none;
+    animation: fadeIn 0.25s ease;
+}
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   Dark-mode overrides for inline light colors in the template.
+   These catch hardcoded values in index.html's style="" attributes
+   so the dark theme stays consistent without editing the markup.
+   ============================================================ */
+
+/* light backgrounds -> card */
+[style*="background: #fff"], [style*="background:#fff"],
+[style*="background-color:white"], [style*="background-color: white"],
+[style*="background: white"], [style*="background:white"] {
+    background-color: var(--card) !important;
+}
+
+/* subtle light fills -> inset surface */
+[style*="background: #f8f9fa"], [style*="background:#f8f9fa"],
+[style*="background: #eee"], [style*="background:#eee"],
+[style*="background:#fdfdfd"], [style*="background: #fdfdfd"],
+[style*="background:#fafafa"], [style*="background: #fafafa"],
+[style*="background: #f0e6fa"], [style*="background:#f0e6fa"] {
+    background-color: var(--surface-2) !important;
+}
+
+/* purple/blue accent backgrounds -> emerald accent */
+[style*="background:#764ba2"], [style*="background: #764ba2"],
+[style*="background:#8e44ad"], [style*="background: #8e44ad"],
+[style*="background:#667eea"], [style*="background: #667eea"],
+[style*="background:#43e97b"], [style*="background: #43e97b"] {
+    background-color: var(--accent) !important;
+}
+
+/* light borders -> dark border */
+[style*="solid #ddd"], [style*="solid #ccc"], [style*="solid #eee"],
+[style*="solid #e0e0e0"], [style*="solid #f0f0f0"],
+[style*="dashed #ccc"], [style*="dashed #eee"], [style*="solid #c39bd3"] {
+    border-color: var(--border) !important;
+}
+
+/* dark inline text -> readable ink */
+[style*="color: #333"], [style*="color:#333"],
+[style*="color: #444"], [style*="color:#444"] {
+    color: var(--ink) !important;
+}
+
+/* muted inline text -> muted token */
+[style*="color: #666"], [style*="color:#666"],
+[style*="color: #888"], [style*="color:#888"],
+[style*="color: #999"], [style*="color:#999"],
+[style*="color: #777"], [style*="color:#777"],
+[style*="color: #bbb"], [style*="color:#bbb"],
+[style*="color: #555"], [style*="color:#555"] {
+    color: var(--muted) !important;
+}
+
+/* purple inline text -> accent */
+[style*="color: #764ba2"], [style*="color:#764ba2"],
+[style*="color: #8e44ad"], [style*="color:#8e44ad"],
+[style*="color:#6c2a8a"], [style*="color:#4c2aa6"] {
+    color: var(--accent) !important;
+}
+
+/* JS-injected pale row backgrounds -> dark-friendly tints */
+[style*="background-color: #f0fff4"], [style*="background-color:#f0fff4"],
+[style*="background: #f0fff4"], [style*="background:#f0fff4"] {
+    background-color: rgba(79, 203, 142, 0.12) !important;
+}
+[style*="background: #fcfcfc"], [style*="background:#fcfcfc"],
+[style*="background: #fdfdfd"], [style*="background:#fdfdfd"] {
+    background-color: var(--surface-2) !important;
+}
+[style*="background:#e9e6fb"], [style*="background: #e9e6fb"],
+[style*="background:#e0d0f5"], [style*="background: #e0d0f5"] {
+    background-color: var(--accent-soft) !important;
+}
+
+/* transaction tag pills */
+.transaction-tag {
+    background: var(--accent-soft) !important;
+    color: var(--ink) !important;
+    border: 1px solid rgba(52, 167, 123, 0.45) !important;
+}
+
+/* form controls */
+select, input[type="text"], input[type="number"], input[type="date"], textarea {
+    background-color: var(--field) !important;
+    color: var(--ink) !important;
+    border-color: var(--border) !important;
+}
+option { background-color: var(--card); color: var(--ink); }
+::placeholder { color: var(--faint); }
+
+/* generic/unclassed buttons -> subtle dark surface (inline-colored buttons keep their color) */
+button:not(.tab-btn):not(.toggle-btn):not(.btn-add):not(.btn-move):not(.btn-delete):not(.btn-edit):not(.btn-primary):not(.time-btn) {
+    font-family: inherit;
+    background: var(--surface-2);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+/* ---------- Mobile ---------- */
 @media (max-width: 768px) {
-    /* On mobile, we make buttons slightly larger for fingers */
-    .btn-move, .btn-delete, .btn-edit, .btn-add { /* Apply unified styles to mobile too */
+    body { padding: 12px; }
+    .container { padding: 20px; border-radius: 14px; }
+    h1 { font-size: 1.4em; }
+
+    .tab-nav { display: flex; flex-wrap: wrap; width: 100%; }
+    .tab-btn { flex: 1; }
+
+    .file-input-wrapper { flex-direction: column; align-items: stretch; }
+    .btn-primary { width: 100%; }
+
+    .transaction-item { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .summary-grid, .overview-grid { grid-template-columns: 1fr; }
+    .overview-row { flex-direction: column; }
+    .overview-row .chart-container { width: 100%; min-height: 300px; }
+
+    .filter-grid { grid-template-columns: 1fr; }
+    .date-filters { flex-direction: row; }
+
+    .btn-move, .btn-delete, .btn-edit, .btn-add {
         width: 100%;
         padding: 10px 5px;
-        font-size: 0.85em;
         min-width: auto;
     }
-
-    /* Reduce padding on mobile to fit more columns */
-    th, td {
-        padding: 8px 4px;
-        font-size: 0.85em;
-    }
-}
-
-.overview-row {
-    display: flex;
-    gap: 20px;
-    margin-bottom: 40px;
-    align-items: flex-start;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 20px;
-}
-
-.overview-row .table-container {
-    flex: 1; /* Table takes 50% */
-}
-
-.overview-row .chart-container {
-    flex: 1; /* Chart takes 50% */
-    min-height: 350px;
-}
-
-/* Responsive: Stack them on iPhone */
-@media (max-width: 768px) {
-    .overview-row {
-        flex-direction: column;
-    }
-    .overview-row .chart-container {
-        width: 100%;
-        min-height: 300px;
-    }
-}
-
-.table-scroll-container {
-    max-height: 500px; /* Adjust this height based on your preference */
-    overflow-y: auto;  /* Vertical scrollbar only when needed */
-    border: 1px solid #eee;
-    border-radius: 8px;
-    margin-top: 10px;
-}
-
-/* Optional: Make the table headers stay at the top while scrolling */
-.table-scroll-container thead th {
-    position: sticky;
-    top: 0;
-    background-color: #f8f9fa; /* Match your page background */
-    z-index: 10;
-    box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); /* Subtle line under header */
-}
-
-/* Customize scrollbar appearance for a cleaner look */
-.table-scroll-container::-webkit-scrollbar {
-    width: 8px;
-}
-
-.table-scroll-container::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 10px;
-}
-
-.table-scroll-container::-webkit-scrollbar-thumb {
-    background: #ccc;
-    border-radius: 10px;
-}
-
-.table-scroll-container::-webkit-scrollbar-thumb:hover {
-    background: #999;
-}
-
-@media (max-width: 768px) {
-    .table-scroll-container {
-        max-height: 350px; /* Slightly shorter for phones */
-    }
-}
-
-/* Styling for the checkboxes */
-input[type="checkbox"] {
-    cursor: pointer;
-    transform: scale(1.2);
-}
-
-/* Update table layout for the new structure */
-#fullTransactionsTable td, #paymentsTable td {
-    vertical-align: middle;
-}
-
-/* Add style for the new Edit button */
-.btn-edit:hover {
-    background: #e67e22 !important;
-}
-
-/* Base style for the Account tag */
-.tag-account {
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-size: 0.85em;
-    font-weight: 600;
-    color: white;
-    background-color: #666; /* Default gray */
-    text-align: center;
-    min-width: 90px;
-}
-
-/* Chase: Signature Blue */
-.tag-chase {
-    background-color: #117aca;
-    border-bottom: 3px solid #004a97;
-}
-
-/* Capital One: Blue and Red accents */
-.tag-capone {
-    background-color: #00355f;
-    border-left: 4px solid #d03027;
-}
-
-/* Venmo: Bright Blue */
-.tag-venmo {
-    background-color: #3d95ce;
-}
-
-/* Cash / Other */
-.tag-other {
-    background-color: #2c3e50;
-    font-style: italic;
-}
-
-.toggle-btn {
-    padding: 6px 15px;
-    border: 1px solid #ddd;
-    background: white;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 0.85em;
-    transition: all 0.2s;
-}
-.toggle-btn.active {
-    background: #764ba2;
-    color: white;
-    border-color: #764ba2;
-}
-
-.chart-time-controls .time-btn {
-    padding: 4px 10px;
-    border: 1px solid #ddd;
-    background: white;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 0.8em;
-    margin-left: 5px;
-    transition: all 0.2s;
-}
-.chart-time-controls .time-btn.active {
-    background: #8e44ad;
-    color: white;
-    border-color: #8e44ad;
+    th, td { padding: 8px 4px; font-size: 0.85em; }
+    .table-scroll-container { max-height: 350px; }
 }
