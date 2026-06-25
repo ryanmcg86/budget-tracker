@@ -241,9 +241,25 @@ Inserts the user-selected transactions into the database. For each transaction: 
 ---
 
 <details>
+<summary><strong>templates/index.html</strong></summary>
+
+The single HTML page the browser loads. All tabs, tables, modals, and the sidebar are defined here as static markup; `main.js` populates and controls them at runtime. Key responsibilities:
+
+- **Tab shell** — defines the five tab sections (Overview, Transactions, Shared Ledger, Detailed Breakdowns, Import) and the `openTab()` navigation logic.
+- **Modals** — contains the HTML for the Edit, Add Transaction, Tag, Shared Split, and Conflict Resolution modals.
+- **Plaid Import layout** — the Review & Select table, the Filtered Out table, and the connected-accounts list.
+- **Detailed Breakdowns sidebar** — the Saved Views panel, Tags panel (with Deselect All and Load Default View), and the category/year/month/view-mode/time-range controls.
+- **Data island** — injects `TRACKED_CATEGORIES` from `database.py` as a `<script type="application/json">` block so `main.js` can read the category list without an extra API call.
+- **Script loading** — loads Plotly.js, the Plaid Link SDK, and `main.js` at the bottom of the body.
+
+</details>
+
+---
+
+<details>
 <summary><strong>static/js/main.js</strong></summary>
 
-All client-side logic. The page is a single HTML file; this script drives every tab, modal, chart, and data fetch. Functions are grouped by feature area below.
+All client-side logic. Loaded by `templates/index.html`; this script drives every tab, modal, chart, and data fetch. Functions are grouped by feature area below.
 
 ### Initialisation
 
