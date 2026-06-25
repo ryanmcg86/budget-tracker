@@ -20,7 +20,10 @@ budget-tracker/
 
 ---
 
-## `database.py`
+## Scripts
+
+<details>
+<summary><strong>database.py</strong></summary>
 
 Owns the database layer. All other files import from here rather than opening `budget.db` directly.
 
@@ -76,9 +79,12 @@ Normalises `card_name` values left over from CSV imports (e.g. collapses various
 **`migrate_to_unique()`**
 Historical one-time migration that added a `UNIQUE` constraint to the transactions table. No longer called; kept for reference.
 
+</details>
+
 ---
 
-## `plaid_integration.py`
+<details>
+<summary><strong>plaid_integration.py</strong></summary>
 
 Thin wrapper around the Plaid Python SDK. Flask routes in `app.py` call these functions; nothing else should import the Plaid SDK directly.
 
@@ -99,9 +105,12 @@ Pulls all transactions for a connected account from `start_date` through today, 
 **`_shape_transaction(plaid_txn)`**
 Maps a raw Plaid transaction object to the app's internal dict format. Prefers the newer `personal_finance_category` taxonomy for `bank_category`, falling back to the legacy category list. Amounts follow Plaid's convention: positive = debit (money leaving the account), negative = credit (money arriving).
 
+</details>
+
 ---
 
-## `app.py`
+<details>
+<summary><strong>app.py</strong></summary>
 
 The Flask application. Every URL the frontend calls is defined here. Helper functions that don't serve a route live at the top of the Plaid section.
 
@@ -227,9 +236,12 @@ Given a list of transaction descriptions, returns the most recent shared-expense
 **`POST /api/plaid/import-transactions`**
 Inserts the user-selected transactions into the database. For each transaction: backfills the `plaid_transaction_id` onto an existing CSV-imported row if one matches, otherwise inserts a new row. Also applies resolved tags and shared split data (setting `is_shared`, `payer`, `transaction_shares`, and `reimbursement_amount`).
 
+</details>
+
 ---
 
-## `static/js/main.js`
+<details>
+<summary><strong>static/js/main.js</strong></summary>
 
 All client-side logic. The page is a single HTML file; this script drives every tab, modal, chart, and data fetch. Functions are grouped by feature area below.
 
@@ -448,17 +460,25 @@ Manages the split-configuration modal shown during import. Pre-fills from the hi
 **`showConflictModal(description, options)` / `resolveConflict(choice)`**
 Manages the category-conflict modal shown when a description has inconsistent historical profiles. Presents the options as radio buttons and resolves to the chosen `{ category, tags }` object (or `null` to leave blank).
 
----
-
-## `debug_import.py`
-
-A standalone diagnostic script used to investigate why duplicate Plaid transactions weren't being inserted. Prints the `transactions` table schema, current indexes, recent rows, and simulates an insert without saving. **Safe to delete.**
+</details>
 
 ---
 
-## `migrate_drop_unique.py`
+<details>
+<summary><strong>debug_import.py</strong> — one-off diagnostic script (safe to delete)</summary>
 
-A one-time migration script that removed the `UNIQUE(date, description, amount, card_name)` constraint from the `transactions` table and replaced it with a partial unique index on `plaid_transaction_id`. This allows the same transaction to appear on multiple cards (e.g. a Metro card used twice on the same day) while still deduplicating Plaid imports. **Safe to delete.**
+A standalone diagnostic script used to investigate why duplicate Plaid transactions weren't being inserted. Prints the `transactions` table schema, current indexes, recent rows, and simulates an insert without saving.
+
+</details>
+
+---
+
+<details>
+<summary><strong>migrate_drop_unique.py</strong> — one-off schema migration (safe to delete)</summary>
+
+A one-time migration script that removed the `UNIQUE(date, description, amount, card_name)` constraint from the `transactions` table and replaced it with a partial unique index on `plaid_transaction_id`. This allows the same transaction to appear on multiple cards (e.g. a Metro card used twice on the same day) while still deduplicating Plaid imports.
+
+</details>
 
 ---
 
