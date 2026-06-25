@@ -480,24 +480,6 @@ Manages the category-conflict modal shown when a description has inconsistent hi
 
 ---
 
-<details>
-<summary><strong>debug_import.py</strong> — one-off diagnostic script (safe to delete)</summary>
-
-A standalone diagnostic script used to investigate why duplicate Plaid transactions weren't being inserted. Prints the `transactions` table schema, current indexes, recent rows, and simulates an insert without saving.
-
-</details>
-
----
-
-<details>
-<summary><strong>migrate_drop_unique.py</strong> — one-off schema migration (safe to delete)</summary>
-
-A one-time migration script that removed the `UNIQUE(date, description, amount, card_name)` constraint from the `transactions` table and replaced it with a partial unique index on `plaid_transaction_id`. This allows the same transaction to appear on multiple cards (e.g. a Metro card used twice on the same day) while still deduplicating Plaid imports.
-
-</details>
-
----
-
 ## Environment Variables
 
 Create a `.env` file in the project root:
