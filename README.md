@@ -111,7 +111,7 @@ The Flask application. Every URL the frontend calls is defined here. Helper func
 Parses a pandas DataFrame from a CSV upload. Auto-detects date, description, amount, and category columns by name. Normalises amounts (expenses stored as positive), detects payments/credits, deduplicates rows that appear more than once within the same file, and calls `insert_transactions`. Returns the number of rows inserted.
 
 **`_filter_internal_transfers(candidates)`**
-Removes matched pairs of internal account transfer transactions from a Plaid candidate list before showing them to the user. Known pairs are defined in `TRANSFER_PAIRS` — currently: Venmo "Standard transfer" ↔ Capital One "Venmo" (cash transfer between own accounts), and Capital One "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile" (monthly credit card bill payment). Pairs are matched on equal-and-opposite amounts within a 5-day date window.
+Splits a Plaid candidate list into `(kept, removed)` based on known internal transfer pairs. Known pairs are defined in `TRANSFER_PAIRS` — currently: Venmo "Standard transfer" ↔ Capital One "Venmo" (cash transfer between own accounts), and Capital One "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile" (monthly credit card bill payment). Pairs are matched on equal-and-opposite amounts within a 5-day date window. Returns a tuple so the caller can expose both lists to the user.
 
 ### Routes
 
@@ -216,7 +216,7 @@ Returns all connected Plaid accounts (no tokens exposed to the client).
 Disconnects a Plaid account (DELETE) or renames its display name (PATCH).
 
 **`POST /api/plaid/fetch-transactions`**
-Fetches candidate transactions from all connected accounts since a given date, filters out any already in the database by Plaid transaction ID, removes internal transfer pairs via `_filter_internal_transfers`, and returns the remainder for the user to review.
+Fetches candidate transactions from all connected accounts since a given date, filters out any already in the database by Plaid transaction ID, and splits the remainder through `_filter_internal_transfers`. Returns `{ candidates: [...], filtered_out: [...] }` so the frontend can display both the importable list and the automatically suppressed transfers side-by-side.
 
 **`POST /api/plaid/lookup-profiles`**
 Given a list of transaction descriptions, returns the existing category and tag profile for each one — `unique` if all prior transactions share the same category/tags, `conflict` if they differ, or `none` if unseen. Used during import to auto-apply or prompt for resolution.
@@ -397,7 +397,7 @@ Removes a view from the comparison set, deletes it from the database, and refres
 Called when one or more saved views are active. Fetches breakdown data for all active views in parallel (using the current year/month and global view mode / time range), then calls `renderComparisonChart` and `renderComparisonTable`.
 
 **`renderComparisonChart(results)`**
-Plots one colored Plotly line trace per active view on the same axes for direct comparison.
+Plots one colored Plotly line trace per active view on the same axes for direct comparison. When exactly one view is active, also adds a dashed red average line (matching the single-view chart behavior).
 
 **`renderComparisonTable(results)`**
 Merges all transactions from all active views, sorts by date descending, groups by month with dark header rows, and renders each transaction row with a left-border color and view-name label matching its graph line color.
@@ -417,13 +417,22 @@ Fetches connected accounts and renders them in the account list with Rename and 
 PATCH or DELETE a connected account record.
 
 **`fetchPlaidCandidates()`**
-Posts the selected since-date to `/api/plaid/fetch-transactions` and calls `renderPlaidCandidates` with the results.
+Posts the selected since-date to `/api/plaid/fetch-transactions`, stores the returned `candidates` list in `plaidCandidates` and the `filtered_out` list in `plaidFilteredOut`, then calls `renderPlaidCandidates`.
 
 **`renderPlaidCandidates()`**
-Renders the candidate transaction table with pre-checked checkboxes and color-coded amounts.
+Renders the candidate transaction table with pre-checked checkboxes and color-coded amounts. Always calls `renderFilteredOutTable()` at the end so the Filtered Out section stays in sync.
 
 **`plaidSelectAll(checked)`**
 Checks or unchecks all candidate checkboxes.
+
+**`moveToFiltered()`**
+Moves all currently checked rows from the candidates table into `plaidFilteredOut` and re-renders both tables. Used when you want to manually suppress a transaction that wasn't caught by the automatic filter.
+
+**`moveBackToImportable(plaidId)`**
+Moves a single transaction from `plaidFilteredOut` back into `plaidCandidates` (re-sorted by date) and re-renders both tables. Exposed as a "Restore" button on each row in the Filtered Out table.
+
+**`renderFilteredOutTable()`**
+Renders the Filtered Out section below the candidates table. Shows transactions that were either automatically removed by `_filter_internal_transfers` or manually filtered by the user. Hidden when the list is empty. Each row includes a Restore button that calls `moveBackToImportable`.
 
 **`importSelectedPlaidTransactions()`**
 Orchestrates the full import flow for checked candidates:
