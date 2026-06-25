@@ -2444,6 +2444,20 @@ function renderComparisonChart(results) {
         hovertemplate: `<b>${view.name}</b><br>%{x}<br>$%{y:,.2f}<extra></extra>`
     }));
 
+    if (results.length === 1) {
+        const y = results[0].data.graph.map(g => g.total);
+        const x = results[0].data.graph.map(g => g.month);
+        const average = y.length > 0 ? y.reduce((s, v) => s + v, 0) / y.length : 0;
+        traces.push({
+            x, y: Array(y.length).fill(average),
+            type: 'scatter',
+            mode: 'lines',
+            name: `Average ($${average.toFixed(2)})`,
+            line: { color: '#e74c3c', width: 2, dash: 'dash' },
+            hovertemplate: '<b>Average</b><br>$%{y:,.2f}<extra></extra>'
+        });
+    }
+
     Plotly.newPlot('breakdownHistoryChart', traces, {
         xaxis: { title: 'Month' },
         yaxis: { title: 'Total Spend ($)', tickprefix: '$' },
