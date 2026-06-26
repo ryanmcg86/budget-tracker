@@ -283,8 +283,12 @@ async function loadSankeyChart() {
         'Other': '#C2596B'
     };
 
-    const nodeLabels = ['Income', ...categories.map(c => c.name)];
-    const nodeColors = ['#43e97b', ...categories.map(c => catColors[c.name] || '#888888')];
+    const nodeLabels   = ['Income', ...categories.map(c => c.name)];
+    const nodeColors   = ['#43e97b', ...categories.map(c => catColors[c.name] || '#888888')];
+    // customdata holds the "true" value for each node so the hover is always accurate.
+    // Plotly's %{value} on a source node shows outgoing-flow totals, not the query result —
+    // using customdata lets the Income node show actual income rather than total expenses.
+    const nodeCustom   = [income, ...categories.map(c => c.total)];
 
     const sources = categories.map(() => 0);
     const targets = categories.map((_, i) => i + 1);
@@ -293,21 +297,22 @@ async function loadSankeyChart() {
     if (savings > 0.01) {
         nodeLabels.push('Savings');
         nodeColors.push('#27ae60');
+        nodeCustom.push(savings);
         sources.push(0);
         targets.push(nodeLabels.length - 1);
         values.push(savings);
     } else if (savings < -0.01) {
-        // Deficit month: add a red source node representing the shortfall so the chart balances
+        // Deficit month: add a red source node for the shortfall so the chart balances
         const deficit = Math.abs(savings);
         const deficitIdx = nodeLabels.length;
-        nodeLabels.push(`Deficit ($${deficit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
+        nodeLabels.push('Deficit');
         nodeColors.push('#e74c3c');
+        nodeCustom.push(deficit);
         // Spread the deficit across categories proportionally
         categories.forEach((cat, i) => {
-            const share = (cat.total / totalExpenses) * deficit;
             sources.push(deficitIdx);
             targets.push(i + 1);
-            values.push(share);
+            values.push((cat.total / totalExpenses) * deficit);
         });
     }
 
@@ -325,7 +330,8 @@ async function loadSankeyChart() {
             line: { color: 'rgba(0,0,0,0)', width: 0 },
             label: nodeLabels,
             color: nodeColors,
-            hovertemplate: '<b>%{label}</b><br>$%{value:,.2f}<extra></extra>'
+            customdata: nodeCustom,
+            hovertemplate: '<b>%{label}</b><br>$%{customdata:,.2f}<extra></extra>'
         },
         link: {
             source: sources,

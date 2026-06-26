@@ -295,6 +295,19 @@ def sankey_data():
         ORDER BY total DESC
     ''', (start_str, end_str, *TRACKED_CATEGORIES))
     categories = [{'name': r['category'], 'total': round(r['total'], 2)} for r in cur.fetchall()]
+
+    # Capture expenses that fall outside TRACKED_CATEGORIES so the totals match reality
+    cur.execute(f'''
+        SELECT COALESCE(SUM({amount_case}), 0) as total
+        FROM transactions
+        WHERE is_payment = 0
+          AND date >= ? AND date <= ?
+          AND (category IS NULL OR category = '' OR category NOT IN ({placeholders}))
+    ''', (start_str, end_str, *TRACKED_CATEGORIES))
+    uncategorized = round(cur.fetchone()[0], 2)
+    if uncategorized > 0.01:
+        categories.append({'name': 'Uncategorized', 'total': uncategorized})
+
     conn.close()
 
     return jsonify({'income': round(income, 2), 'categories': categories})
