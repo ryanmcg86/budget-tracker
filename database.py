@@ -502,7 +502,9 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y'):
 
     end_date = datetime(int(year), int(month), 1)
 
-    if time_range == '3m':
+    if time_range == '1m':
+        start_date = end_date
+    elif time_range == '3m':
         start_date = end_date - relativedelta(months=2)
     elif time_range == '6m':
         start_date = end_date - relativedelta(months=5)

@@ -237,6 +237,69 @@ def overview_history():
     return jsonify(data)
 
 
+@app.route('/api/sankey-data')
+def sankey_data():
+    from database import get_db_connection, TRACKED_CATEGORIES
+    from dateutil.relativedelta import relativedelta
+    from calendar import monthrange
+
+    year  = int(request.args.get('year'))
+    month = int(request.args.get('month'))
+    view_mode  = request.args.get('view_mode', 'gross')
+    time_range = request.args.get('time_range', '6m')
+
+    end_dt = datetime(year, month, 1)
+    if time_range == '1m':
+        start_dt = end_dt
+    elif time_range == '3m':
+        start_dt = end_dt - relativedelta(months=2)
+    elif time_range == '6m':
+        start_dt = end_dt - relativedelta(months=5)
+    elif time_range == '5y':
+        start_dt = end_dt - relativedelta(years=4, months=11)
+    else:
+        start_dt = end_dt - relativedelta(months=11)
+
+    start_str = start_dt.strftime('%Y-%m-01')
+    last_day  = monthrange(year, month)[1]
+    end_str   = f'{year}-{month:02d}-{last_day}'
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    # Income: payments/credits received; net mode excludes shared income
+    shared_filter = 'AND is_shared = 0' if view_mode == 'net' else ''
+    cur.execute(f'''
+        SELECT COALESCE(SUM(ABS(amount)), 0)
+        FROM transactions
+        WHERE is_payment = 1 {shared_filter}
+          AND date >= ? AND date <= ?
+    ''', (start_str, end_str))
+    income = cur.fetchone()[0]
+
+    # Expenses by category using the same gross/net formula as the bar chart
+    amount_col = '(amount - COALESCE(reimbursement_amount, 0))' if view_mode == 'net' else 'amount'
+    amount_case = f'''
+        CASE WHEN payer = 'Me' THEN {amount_col}
+             ELSE COALESCE(reimbursement_amount, 0) END
+    '''
+    placeholders = ','.join(['?'] * len(TRACKED_CATEGORIES))
+    cur.execute(f'''
+        SELECT category, SUM({amount_case}) as total
+        FROM transactions
+        WHERE is_payment = 0
+          AND date >= ? AND date <= ?
+          AND category IN ({placeholders})
+        GROUP BY category
+        HAVING total > 0
+        ORDER BY total DESC
+    ''', (start_str, end_str, *TRACKED_CATEGORIES))
+    categories = [{'name': r['category'], 'total': round(r['total'], 2)} for r in cur.fetchall()]
+    conn.close()
+
+    return jsonify({'income': round(income, 2), 'categories': categories})
+
+
 @app.route('/api/transaction/<int:txn_id>/toggle-payment', methods=['POST'])
 def toggle_payment(txn_id):
     from database import get_db_connection

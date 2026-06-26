@@ -45,11 +45,18 @@
                 <button id="btnNet" class="toggle-btn active" onclick="setViewMode('net')">Net (My Responsibility)</button>
             </div>
 
-            <!-- Monthly Spending Trend -->
+            <!-- Monthly Spending Trend / Income Flow carousel -->
             <div class="chart-container" style="margin-bottom: 30px; border: 1px solid #eee; border-radius: 12px; padding: 15px; min-height: 350px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0;">Monthly Spending Trend</h3>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <button id="slideLeft" onclick="setOverviewSlide(0)"
+                                style="background:none; border:none; font-size:1.8em; line-height:1; cursor:pointer; color:#555; padding:0 2px; opacity:0.3; pointer-events:none;">&#8249;</button>
+                        <h3 style="margin: 0;" id="overviewChartTitle">Monthly Spending Trend</h3>
+                        <button id="slideRight" onclick="setOverviewSlide(1)"
+                                style="background:none; border:none; font-size:1.8em; line-height:1; cursor:pointer; color:#555; padding:0 2px;">&#8250;</button>
+                    </div>
                     <div class="chart-time-controls">
+                        <button class="time-btn" onclick="setOverviewChartRange(event, '1m')">1M</button>
                         <button class="time-btn" onclick="setOverviewChartRange(event, '3m')">3M</button>
                         <button class="time-btn active" onclick="setOverviewChartRange(event, '6m')">6M</button>
                         <button class="time-btn" onclick="setOverviewChartRange(event, '1y')">1Y</button>
@@ -57,6 +64,13 @@
                     </div>
                 </div>
                 <div id="overviewHistoryChart"></div>
+                <div id="overviewSankeyChart" style="display:none; min-height:320px;"></div>
+                <div style="display:flex; justify-content:center; gap:6px; margin-top:10px;">
+                    <span class="slide-dot" data-slide="0" onclick="setOverviewSlide(0)"
+                          style="width:8px; height:8px; border-radius:50%; background:#764ba2; cursor:pointer; display:inline-block;"></span>
+                    <span class="slide-dot" data-slide="1" onclick="setOverviewSlide(1)"
+                          style="width:8px; height:8px; border-radius:50%; background:#ccc; cursor:pointer; display:inline-block;"></span>
+                </div>
             </div>
 
             <!-- Row 1: Monthly -->

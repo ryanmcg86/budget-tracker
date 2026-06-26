@@ -216,14 +216,38 @@ async function loadSummary() {
         // Context panels beside each table (replaces the old per-table charts)
         safe(() => loadOverviewInsights(), 'overviewInsights');
 
-        // Update the Monthly Spending Trend bar chart
-        safe(() => loadOverviewHistoryChart(), 'overviewHistory');
+        // Update the chart panel (bar chart or Sankey depending on active slide)
+        safe(() => loadCurrentOverviewChart(), 'overviewHistory');
     } catch (error) {
         console.error('Error loading summary:', error);
     }
 }
 
 let overviewChartRange = '6m'; // Default chart range for the Monthly Spending Trend graph
+let overviewSlide = 0; // 0 = bar chart, 1 = Sankey
+
+function setOverviewSlide(index) {
+    overviewSlide = index;
+    const titles = ['Monthly Spending Trend', 'Income Flow'];
+    document.getElementById('overviewChartTitle').textContent = titles[index];
+
+    document.getElementById('overviewHistoryChart').style.display = index === 0 ? 'block' : 'none';
+    document.getElementById('overviewSankeyChart').style.display  = index === 1 ? 'block' : 'none';
+
+    const leftBtn  = document.getElementById('slideLeft');
+    const rightBtn = document.getElementById('slideRight');
+    leftBtn.style.opacity       = index === 0 ? '0.3' : '1';
+    leftBtn.style.pointerEvents = index === 0 ? 'none' : 'auto';
+    rightBtn.style.opacity       = index === 1 ? '0.3' : '1';
+    rightBtn.style.pointerEvents = index === 1 ? 'none' : 'auto';
+
+    document.querySelectorAll('.slide-dot').forEach(dot => {
+        dot.style.background = dot.dataset.slide === String(index) ? '#764ba2' : '#ccc';
+    });
+
+    if (index === 0) loadOverviewHistoryChart();
+    else             loadSankeyChart();
+}
 
 function setOverviewChartRange(event, range) {
     overviewChartRange = range;
@@ -231,7 +255,93 @@ function setOverviewChartRange(event, range) {
     const container = event.currentTarget.closest('.chart-time-controls');
     container.querySelectorAll('.time-btn').forEach(btn => btn.classList.remove('active'));
     event.currentTarget.classList.add('active');
-    loadOverviewHistoryChart();
+    loadCurrentOverviewChart();
+}
+
+function loadCurrentOverviewChart() {
+    if (overviewSlide === 0) loadOverviewHistoryChart();
+    else                     loadSankeyChart();
+}
+
+async function loadSankeyChart() {
+    const year  = document.getElementById('yearSelect').value;
+    const month = document.getElementById('monthSelect').value;
+    if (!year || !month) return;
+
+    const params = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange });
+    const res  = await fetch(`/api/sankey-data?${params.toString()}`);
+    const data = await res.json();
+
+    const { income, categories } = data;
+    const totalExpenses = categories.reduce((s, c) => s + c.total, 0);
+    const savings = income - totalExpenses;
+
+    const catColors = {
+        'Streaming': '#34A77B', 'Transportation': '#5B9BD5', 'Food/Drink': '#D2A859',
+        'Shopping': '#9B7BD0', 'Utilities': '#E0795F', 'Healthcare': '#4FB6A8',
+        'Entertainment': '#D27FB0', 'Housing': '#8FB04F', 'Personal Care': '#7E8AA0',
+        'Other': '#C2596B'
+    };
+
+    const nodeLabels = ['Income', ...categories.map(c => c.name)];
+    const nodeColors = ['#43e97b', ...categories.map(c => catColors[c.name] || '#888888')];
+
+    const sources = categories.map(() => 0);
+    const targets = categories.map((_, i) => i + 1);
+    const values  = categories.map(c => c.total);
+
+    if (savings > 0.01) {
+        nodeLabels.push('Savings');
+        nodeColors.push('#27ae60');
+        sources.push(0);
+        targets.push(nodeLabels.length - 1);
+        values.push(savings);
+    } else if (savings < -0.01) {
+        // Deficit month: add a red source node representing the shortfall so the chart balances
+        const deficit = Math.abs(savings);
+        const deficitIdx = nodeLabels.length;
+        nodeLabels.push(`Deficit ($${deficit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
+        nodeColors.push('#e74c3c');
+        // Spread the deficit across categories proportionally
+        categories.forEach((cat, i) => {
+            const share = (cat.total / totalExpenses) * deficit;
+            sources.push(deficitIdx);
+            targets.push(i + 1);
+            values.push(share);
+        });
+    }
+
+    const hexA = (hex, a) => {
+        const h = hex.replace('#', '');
+        const r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+        return `rgba(${r},${g},${b},${a})`;
+    };
+
+    const trace = {
+        type: 'sankey',
+        orientation: 'h',
+        node: {
+            pad: 15, thickness: 20,
+            line: { color: 'rgba(0,0,0,0)', width: 0 },
+            label: nodeLabels,
+            color: nodeColors,
+            hovertemplate: '<b>%{label}</b><br>$%{value:,.2f}<extra></extra>'
+        },
+        link: {
+            source: sources,
+            target: targets,
+            value: values,
+            color: targets.map(t => hexA(nodeColors[t], 0.35)),
+            hovertemplate: '%{source.label} → %{target.label}<br>$%{value:,.2f}<extra></extra>'
+        }
+    };
+
+    Plotly.newPlot('overviewSankeyChart', [trace], {
+        font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif', size: 12 },
+        margin: { t: 10, b: 10, l: 10, r: 10 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor:  'rgba(0,0,0,0)',
+    }, { responsive: true, displayModeBar: false });
 }
 
 async function loadOverviewHistoryChart() {
@@ -258,23 +368,37 @@ async function loadOverviewHistoryChart() {
             return `rgba(${r}, ${g}, ${b}, ${a})`;
         };
 
-        // One stacked-area band per category; Plotly stacks them into one flowing shape
-        const visibleTraces = TRACKED_CATEGORIES
-            .map((cat, i) => ({
-                x: data.months,
-                y: data.categories[cat] || [],
-                name: cat,
-                type: 'scatter',
-                mode: 'lines',
-                stackgroup: 'one',
-                line: { width: 0.8, color: colors[i % colors.length] },
-                fillcolor: hexA(colors[i % colors.length], 0.82),
-                hoverinfo: 'skip'
-            }))
-            .filter(trace => trace.y.some(v => Math.abs(v) > 0.01));
+        const singleMonth = data.months.length === 1;
 
-        // Per-month totals -> a single invisible trace that carries the hover tooltip,
-        // so hovering a month shows just the total spend (not every category).
+        // For multiple months: stacked-area chart. For a single month: stacked bar chart
+        // (a scatter line with one point renders nothing, so we switch to bars).
+        const visibleTraces = TRACKED_CATEGORIES
+            .map((cat, i) => {
+                const y = data.categories[cat] || [];
+                if (!y.some(v => Math.abs(v) > 0.01)) return null;
+                if (singleMonth) {
+                    return {
+                        x: data.months, y,
+                        name: cat,
+                        type: 'bar',
+                        marker: { color: colors[i % colors.length] },
+                        hovertemplate: `<b>${cat}</b>: $%{y:,.2f}<extra></extra>`
+                    };
+                }
+                return {
+                    x: data.months, y,
+                    name: cat,
+                    type: 'scatter',
+                    mode: 'lines',
+                    stackgroup: 'one',
+                    line: { width: 0.8, color: colors[i % colors.length] },
+                    fillcolor: hexA(colors[i % colors.length], 0.82),
+                    hoverinfo: 'skip'
+                };
+            })
+            .filter(Boolean);
+
+        // Invisible total-hover trace (multi-month only — bar chart shows per-category tooltips)
         const monthTotals = data.months.map((_, mi) =>
             TRACKED_CATEGORIES.reduce((sum, cat) => sum + (data.categories[cat]?.[mi] || 0), 0)
         );
@@ -288,7 +412,7 @@ async function loadOverviewHistoryChart() {
             showlegend: false
         };
 
-        const chartData = [...visibleTraces, totalTrace];
+        const chartData = singleMonth ? visibleTraces : [...visibleTraces, totalTrace];
 
         const layout = {
             font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
@@ -301,10 +425,11 @@ async function loadOverviewHistoryChart() {
                 zerolinecolor: '#565C66',
                 rangemode: 'tozero'
             },
+            barmode: singleMonth ? 'stack' : undefined,
             margin: { t: 20, b: 80, l: 60, r: 20 },
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
-            hovermode: 'x unified',
+            hovermode: singleMonth ? 'closest' : 'x unified',
             hoverlabel: {
                 bgcolor: '#2C3037',
                 bordercolor: '#565C66',
@@ -1164,7 +1289,7 @@ async function updateTagsDropdown() {
 }
 
 async function loadFullTransactions() {
-    const response = await fetch('/api/transactions?limit=1000'); // Increase limit
+    const response = await fetch('/api/transactions?limit=5000');
     allTransactions = await response.json();
     updateBankCategoryDropdown(); // Update bank category dropdown based on loaded transactions
     updateBankNameDropdown(); // Update bank name dropdown based on loaded transactions
