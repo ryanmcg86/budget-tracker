@@ -1947,7 +1947,7 @@ function addShareRow(containerId = 'shareRowsContainer', name = '', amount = '')
     
     const row = document.createElement('div');
     row.className = 'share-row';
-    row.style = "display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; background: #fff; padding: 8px; border-radius: 6px; border: 1px solid #eee;";
+    row.style = "display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; background: transparent; padding: 8px; border-radius: 6px; border: 1px solid #ddd;";
     
     if (payerValue === 'Me') {
         // Scenario 1: [Person] owes me $ [Amount]
