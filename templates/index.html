@@ -244,12 +244,32 @@
         </div> <!-- CLOSE TRANSACTIONS TAB -->
 
         <div id="shared" class="tab-content">
-            <div style="margin-bottom: 20px; background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #ddd; display: flex; align-items: center; gap: 15px;">
+            <div style="margin-bottom: 20px; background: var(--surface-2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
                 <label style="font-weight: bold;">Filter by Person:</label>
                 <select id="sharedPersonFilter" onchange="loadSharedLedger()" style="padding: 8px; border-radius: 6px; min-width: 150px;">
                     <option value="">All People</option>
-                    <!-- Will be populated by JS -->
                 </select>
+                <label style="font-weight: bold; margin-left: 8px;">Month:</label>
+                <select id="sharedYearFilter" onchange="loadSharedLedger()" style="padding: 8px; border-radius: 6px;">
+                    <option value="">All Years</option>
+                </select>
+                <select id="sharedMonthFilter" onchange="loadSharedLedger()" style="padding: 8px; border-radius: 6px;">
+                    <option value="">All Months</option>
+                    <option value="01">January</option>
+                    <option value="02">February</option>
+                    <option value="03">March</option>
+                    <option value="04">April</option>
+                    <option value="05">May</option>
+                    <option value="06">June</option>
+                    <option value="07">July</option>
+                    <option value="08">August</option>
+                    <option value="09">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                </select>
+                <button onclick="clearSharedFilters()" style="padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--canvas); color: var(--muted); cursor: pointer; font-size: 0.85em;">Clear</button>
+                <span id="sharedMonthTotal" style="margin-left: auto; font-size: 0.9em; color: var(--muted);"></span>
             </div>
 
             <!-- Unified Summary Dashboard -->
@@ -649,6 +669,26 @@
                 <div style="margin-bottom:15px;">
                     <label style="display:block; font-size:0.9em; margin-bottom:5px;">New Category</label>
                     <select id="editCategory" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px;"></select>
+                </div>
+
+                <!-- APPLIED DATE OVERRIDE (single-transaction edit only) -->
+                <div id="appliedDateSection" style="margin-bottom:15px; display:none;">
+                    <label style="display:block; font-size:0.9em; margin-bottom:5px;">Apply to Date
+                        <span style="color:var(--faint); font-weight:normal; font-size:0.9em;">(overrides which month this appears in charts; leave blank to clear)</span>
+                    </label>
+                    <input type="date" id="editAppliedDate" style="padding:8px; border:1px solid var(--border); border-radius:6px; width:170px; background:var(--field); color:var(--ink);">
+                </div>
+
+                <!-- PAYMENT SPLITS (single payment edit only) -->
+                <div id="paymentSplitsSection" style="margin-bottom:15px; display:none; background:var(--surface-2); padding:15px; border-radius:8px; border:1px solid var(--border);">
+                    <label style="display:block; font-size:0.9em; margin-bottom:8px; font-weight:bold;">Payment Splits
+                        <span style="color:var(--faint); font-weight:normal; font-size:0.85em;">(assign portions to specific dates so they appear next to charges in the ledger)</span>
+                    </label>
+                    <div id="splitRowsContainer" style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;"></div>
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <button type="button" onclick="addSplitRow()" style="background:var(--accent); color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:0.75em; cursor:pointer; font-weight:600;">+ Add Split</button>
+                        <span id="splitTotalDisplay" style="font-size:0.85em; color:var(--muted);"></span>
+                    </div>
                 </div>
 
                 <!-- SHARED STATUS DROPDOWN -->

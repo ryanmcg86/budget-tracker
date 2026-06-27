@@ -269,26 +269,45 @@ def sankey_data():
 
     # Income: payments/credits received; net mode excludes shared income
     shared_filter = 'AND is_shared = 0' if view_mode == 'net' else ''
+
+    # Unsplit payments: no rows in payment_splits, use COALESCE(applied_date, date)
     cur.execute(f'''
         SELECT COALESCE(SUM(ABS(amount)), 0)
-        FROM transactions
-        WHERE is_payment = 1 {shared_filter}
-          AND date >= ? AND date <= ?
+        FROM transactions t
+        WHERE t.is_payment = 1 {shared_filter}
+          AND NOT EXISTS (SELECT 1 FROM payment_splits WHERE transaction_id = t.id)
+          AND COALESCE(t.applied_date, t.date) >= ? AND COALESCE(t.applied_date, t.date) <= ?
     ''', (start_str, end_str))
     income = cur.fetchone()[0]
 
-    # Expenses by category using the same gross/net formula as the bar chart
-    amount_col = '(amount - COALESCE(reimbursement_amount, 0))' if view_mode == 'net' else 'amount'
-    amount_case = f'''
-        CASE WHEN payer = 'Me' THEN {amount_col}
-             ELSE COALESCE(reimbursement_amount, 0) END
-    '''
+    # Split payments: sum each split's amount within the date range
+    cur.execute(f'''
+        SELECT COALESCE(SUM(ps.amount), 0)
+        FROM payment_splits ps
+        JOIN transactions t ON ps.transaction_id = t.id
+        WHERE t.is_payment = 1 {shared_filter}
+          AND ps.applied_date >= ? AND ps.applied_date <= ?
+    ''', (start_str, end_str))
+    income += cur.fetchone()[0]
+
+    # Gross = cash you actually paid out (payer='Me' only, full amounts; others-paid = not your cash yet).
+    # Net  = your true economic obligation (your share of everything, regardless of who paid).
+    # Difference between net and gross savings = net balance still owed to you.
+    if view_mode == 'gross':
+        amount_case = '''
+            CASE WHEN payer = 'Me' THEN amount ELSE 0 END
+        '''
+    else:
+        amount_case = '''
+            CASE WHEN payer = 'Me' THEN (amount - COALESCE(reimbursement_amount, 0))
+                 ELSE COALESCE(reimbursement_amount, 0) END
+        '''
     placeholders = ','.join(['?'] * len(TRACKED_CATEGORIES))
     cur.execute(f'''
         SELECT category, SUM({amount_case}) as total
         FROM transactions
         WHERE is_payment = 0
-          AND date >= ? AND date <= ?
+          AND COALESCE(applied_date, date) >= ? AND COALESCE(applied_date, date) <= ?
           AND category IN ({placeholders})
         GROUP BY category
         HAVING total > 0
@@ -301,7 +320,7 @@ def sankey_data():
         SELECT COALESCE(SUM({amount_case}), 0) as total
         FROM transactions
         WHERE is_payment = 0
-          AND date >= ? AND date <= ?
+          AND COALESCE(applied_date, date) >= ? AND COALESCE(applied_date, date) <= ?
           AND (category IS NULL OR category = '' OR category NOT IN ({placeholders}))
     ''', (start_str, end_str, *TRACKED_CATEGORIES))
     uncategorized = round(cur.fetchone()[0], 2)
@@ -310,7 +329,10 @@ def sankey_data():
 
     conn.close()
 
-    return jsonify({'income': round(income, 2), 'categories': categories})
+    return jsonify({
+        'income': round(income, 2),
+        'categories': categories,
+    })
 
 
 @app.route('/api/transaction/<int:txn_id>/toggle-payment', methods=['POST'])
@@ -380,7 +402,8 @@ def bulk_edit_transactions():
         ids = data.get('ids', [])
         new_desc = data.get('description')
         new_cat = data.get('category')
-        
+        applied_date_raw = data.get('applied_date')  # 'YYYY-MM' string or None to clear
+
         # Shared status: 1 (Shared), 0 (Personal), or None (No Change)
         is_shared = data.get('is_shared')
         payer = data.get('payer')
@@ -405,10 +428,25 @@ def bulk_edit_transactions():
             # 2. Update category only if a value was selected
             if new_cat:
                 cursor.execute('''
-                    UPDATE transactions 
-                    SET category = ?, is_manual_category = 1 
+                    UPDATE transactions
+                    SET category = ?, is_manual_category = 1
                     WHERE id = ?
                 ''', (new_cat, txn_id))
+
+            # 2b. Update applied_date if the key was sent (None clears the override)
+            if 'applied_date' in data:
+                cursor.execute('UPDATE transactions SET applied_date = ? WHERE id = ?',
+                               (applied_date_raw or None, txn_id))
+
+            # 2c. Save payment splits (sent only for single-transaction edits)
+            if 'payment_splits' in data:
+                cursor.execute('DELETE FROM payment_splits WHERE transaction_id = ?', (txn_id,))
+                for split in data['payment_splits']:
+                    if split.get('date') and float(split.get('amount', 0)) > 0:
+                        cursor.execute(
+                            'INSERT INTO payment_splits (transaction_id, amount, applied_date, note) VALUES (?, ?, ?, ?)',
+                            (txn_id, float(split['amount']), split['date'], split.get('note') or None)
+                        )
             
             # 3. Handle Shared Status & Multi-Person Splits
             if is_shared is not None:
@@ -464,6 +502,8 @@ def bulk_edit_transactions():
 @app.route('/api/shared-ledger')
 def shared_ledger():
     person_filter = request.args.get('person', '')
+    year_filter   = request.args.get('year', '')
+    month_filter  = request.args.get('month', '')
     from database import get_db_connection
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -509,7 +549,8 @@ def shared_ledger():
     # If person_filter exists: limit to items between Me and that person
     # If no filter: show all shared items where I am either the payer or the shareholder
     sql = '''
-        SELECT t.id, t.date, t.description, t.payer, ts.share_amount, t.is_payment, ts.person_name
+        SELECT t.id, t.date, t.applied_date, t.description, t.payer,
+               ts.share_amount, t.is_payment, ts.person_name
         FROM transactions t
         JOIN transaction_shares ts ON t.id = ts.transaction_id
         WHERE t.is_shared = 1 AND (
@@ -518,50 +559,103 @@ def shared_ledger():
         )
         ORDER BY t.date ASC
     '''
-    
+
     filter_payer = "AND ts.person_name = ?" if person_filter else ""
     filter_share = "AND t.payer = ?" if person_filter else ""
-    
+
     query = sql.format(filter_clause_payer=filter_payer, filter_clause_share=filter_share)
     params = (person_filter, person_filter) if person_filter else ()
 
     cursor.execute(query, params)
     rows = cursor.fetchall()
 
-    running_bal = 0
-    for row in rows:
-        amt = float(row['share_amount'])
-        # Logic: 
-        # 1. If I paid: it's a positive increase to the balance (others owe me)
-        # 2. If they paid: it's a negative decrease (I owe them)
-        change = amt if row['payer'] == 'Me' else -amt
-        
-        running_bal += change
-        item = dict(row)
-        item['net_change'] = change
-        item['running_balance'] = running_bal
-        
-        # Fetch tags for this transaction
-        cursor.execute('''
-            SELECT tags.id, tags.name
-            FROM tags
-            JOIN transaction_tags tt ON tags.id = tt.tag_id
-            WHERE tt.transaction_id = ?
+    # Pre-fetch tags for all transaction IDs in one pass
+    txn_ids = list({row['id'] for row in rows})
+    tags_by_txn = {}
+    if txn_ids:
+        placeholders_t = ','.join(['?'] * len(txn_ids))
+        cursor.execute(f'''
+            SELECT tt.transaction_id, tags.id, tags.name
+            FROM tags JOIN transaction_tags tt ON tags.id = tt.tag_id
+            WHERE tt.transaction_id IN ({placeholders_t})
             ORDER BY tags.name
-        ''', (item['id'],))
-        item['tags'] = [{'id': tr['id'], 'name': tr['name']} for tr in cursor.fetchall()]
-        
-        ledger.append(item)
+        ''', txn_ids)
+        for tr in cursor.fetchall():
+            tags_by_txn.setdefault(tr['transaction_id'], []).append({'id': tr['id'], 'name': tr['name']})
+
+    # Pre-fetch payment splits for any payment transactions
+    payment_ids = [row['id'] for row in rows if row['is_payment']]
+    splits_by_txn = {}
+    if payment_ids:
+        placeholders_p = ','.join(['?'] * len(payment_ids))
+        cursor.execute(f'''
+            SELECT transaction_id, amount, applied_date, note
+            FROM payment_splits
+            WHERE transaction_id IN ({placeholders_p})
+            ORDER BY applied_date
+        ''', payment_ids)
+        for sp in cursor.fetchall():
+            splits_by_txn.setdefault(sp['transaction_id'], []).append(dict(sp))
+
+    # Expand each row: payments with splits become one row per split
+    expanded = []
+    for row in rows:
+        base = dict(row)
+        base['tags'] = tags_by_txn.get(base['id'], [])
+
+        if base['is_payment'] and base['id'] in splits_by_txn:
+            for sp in splits_by_txn[base['id']]:
+                split_row = dict(base)
+                split_row['date'] = sp['applied_date']
+                split_row['share_amount'] = sp['amount']
+                split_row['is_split'] = True
+                split_row['split_note'] = sp.get('note') or ''
+                expanded.append(split_row)
+        else:
+            # Use applied_date if set (simple single-date override)
+            base['date'] = base.get('applied_date') or base['date']
+            base['is_split'] = False
+            base['split_note'] = ''
+            expanded.append(base)
+
+    expanded.sort(key=lambda r: r['date'])
+
+    # Compute overall net_change on every row first (needed for net_balance regardless of filter)
+    running_bal = 0
+    for item in expanded:
+        amt = float(item['share_amount'])
+        change = amt if item['payer'] == 'Me' else -amt
+        running_bal += change
+        item['net_change'] = change
 
     net_balance = running_bal
-    # Reverse for display (Newest at top)
+
+    # Apply month/year filter to the display rows only
+    if year_filter and month_filter:
+        prefix = f"{year_filter}-{month_filter.zfill(2)}"
+        display_rows = [r for r in expanded if r['date'].startswith(prefix)]
+    elif year_filter:
+        display_rows = [r for r in expanded if r['date'].startswith(year_filter)]
+    else:
+        display_rows = expanded
+
+    # Recompute running balance within the filtered set
+    month_running = 0
+    for item in display_rows:
+        month_running += item['net_change']
+        item['running_balance'] = month_running
+        ledger.append(item)
+
+    # Reverse for display (newest at top)
     ledger.reverse()
 
     conn.close()
     return jsonify({
         'people': people_data,
         'ledger': ledger,
-        'net_balance': net_balance
+        'net_balance': net_balance,
+        'month_net': round(month_running, 2),
+        'is_filtered': bool(year_filter or month_filter),
     })
 
 
@@ -603,9 +697,13 @@ def get_transaction_details(txn_id):
     # 2. Get the associated shares
     cursor.execute('SELECT person_name, share_amount FROM transaction_shares WHERE transaction_id = ?', (txn_id,))
     shares = [dict(row) for row in cursor.fetchall()]
-    
+
+    # 3. Get any payment splits
+    cursor.execute('SELECT id, amount, applied_date, note FROM payment_splits WHERE transaction_id = ? ORDER BY applied_date', (txn_id,))
+    payment_splits = [dict(row) for row in cursor.fetchall()]
+
     conn.close()
-    return jsonify({**txn, 'shares': shares})
+    return jsonify({**txn, 'shares': shares, 'payment_splits': payment_splits})
 
 @app.route('/api/tags', methods=['GET', 'POST'])
 def manage_tags():
@@ -770,7 +868,7 @@ def breakdown_report():
             ({amount_sql_case}) as display_amount
         FROM transactions t
         WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({",".join(["?"]*len(tag_ids))}))
-        AND t.date >= ? AND t.date < ?
+        AND COALESCE(t.applied_date, t.date) >= ? AND COALESCE(t.applied_date, t.date) < ?
         AND t.category = ? AND t.is_payment = 0
         ORDER BY t.date DESC
     '''
@@ -804,7 +902,7 @@ def breakdown_report():
                 ELSE COALESCE(t.reimbursement_amount, 0)
             END) FROM transactions t
             WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({",".join(["?"]*len(tag_ids))}))
-            AND strftime('%Y', date) = ? AND strftime('%m', date) = ? 
+            AND strftime('%Y', COALESCE(t.applied_date, t.date)) = ? AND strftime('%m', COALESCE(t.applied_date, t.date)) = ?
             AND t.category = ? AND t.is_payment = 0
         '''
         cursor.execute(sql, (*tag_ids, yr, mo, category))
@@ -825,6 +923,7 @@ def api_transactions():
     cur.execute('''
         SELECT t.id, t.date, t.description, t.amount, t.category, t.bank_category, t.merchant,
                t.card_name, t.is_payment, t.is_shared, t.payer, t.reimbursement_amount,
+               t.applied_date,
                (SELECT COUNT(*) FROM settlements s WHERE s.payment_id = t.id OR s.expense_id = t.id) as settlement_count
         FROM transactions t
         ORDER BY date DESC

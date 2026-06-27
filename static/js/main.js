@@ -723,6 +723,43 @@ function formatDate(dateStr) {
     });
 }
 
+function fmtAppliedDate(d) {
+    return d ? formatDate(d) : '';
+}
+
+function addSplitRow(date = '', amount = '', note = '') {
+    const container = document.getElementById('splitRowsContainer');
+    const row = document.createElement('div');
+    row.className = 'split-row';
+    row.style.cssText = 'display:flex; gap:6px; align-items:center;';
+    const inputStyle = 'background:var(--field); color:var(--ink); border:1px solid var(--border); border-radius:4px; padding:6px; font-family:inherit;';
+    row.innerHTML = `
+        <input type="date" class="split-date" value="${date}"
+               style="${inputStyle}" oninput="updateSplitTotal()">
+        <span style="font-weight:bold; color:var(--muted);">$</span>
+        <input type="number" class="split-amount" value="${amount}" step="0.01" placeholder="Amount"
+               style="${inputStyle} width:90px;" oninput="updateSplitTotal()">
+        <input type="text" class="split-note" value="${note}" placeholder="Note (optional)"
+               style="${inputStyle} flex:1;">
+        <button type="button" onclick="removeSplitRow(this)"
+                style="background:var(--neg); color:#fff; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; flex-shrink:0;">✕</button>
+    `;
+    container.appendChild(row);
+    updateSplitTotal();
+}
+
+function removeSplitRow(btn) {
+    btn.closest('.split-row').remove();
+    updateSplitTotal();
+}
+
+function updateSplitTotal() {
+    const total = Array.from(document.querySelectorAll('.split-amount'))
+        .reduce((s, i) => s + (parseFloat(i.value) || 0), 0);
+    const el = document.getElementById('splitTotalDisplay');
+    el.textContent = total > 0 ? `Total: $${total.toFixed(2)}` : '';
+}
+
 async function deleteTransaction(txnId) {
     const txn = allTransactions.find(t => t.id === txnId);
     let msg = 'Are you sure you want to delete this transaction?';
@@ -1387,7 +1424,10 @@ function renderFilteredTable(data) {
         expenseBody.innerHTML = expenses.map(txn => `
             <tr>
                 <td><input type="checkbox" class="expense-check" value="${txn.id}"></td>
-                <td>${formatDate(txn.date)}</td>
+                <td>
+                    ${formatDate(txn.date)}
+                    ${txn.applied_date ? `<div style="font-size:0.75em;color:#e67e22;margin-top:2px;">→ ${fmtAppliedDate(txn.applied_date)}</div>` : ''}
+                </td>
                 <td>
                     <div style="font-weight:600;">${txn.description}</div>
                     <div style="font-size:0.85em; color:#666;">${txn.merchant || ''}</div>
@@ -1410,7 +1450,10 @@ function renderFilteredTable(data) {
             paymentBody.innerHTML = payments.map(txn => `
                 <tr style="background-color: #f0fff4;">
                     <td><input type="checkbox" class="payment-check" value="${txn.id}"></td>
-                    <td>${formatDate(txn.date)}</td>
+                    <td>
+                        ${formatDate(txn.date)}
+                        ${txn.applied_date ? `<div style="font-size:0.75em;color:#e67e22;margin-top:2px;">→ ${fmtAppliedDate(txn.applied_date)}</div>` : ''}
+                    </td>
                     <td>
                         <div style="font-weight:600;">${txn.description}</div>
                         <div style="font-size:0.85em; color:#666;">${txn.merchant || ''}</div>
@@ -1687,6 +1730,10 @@ async function openEditModal() {
     document.getElementById('editDesc').value = '';
     document.getElementById('editSharedStatus').value = 'no_change';
     document.getElementById('sharedFields').style.display = 'none';
+    document.getElementById('editAppliedDate').value = '';
+    document.getElementById('splitRowsContainer').innerHTML = '';
+    document.getElementById('appliedDateSection').style.display = 'none';
+    document.getElementById('paymentSplitsSection').style.display = 'none';
 
     // 2. Rebuild Dropdowns for edit modal
     if (typeof setupModalDropdowns === 'function') {
@@ -1697,6 +1744,20 @@ async function openEditModal() {
     if (ids.length === 1) {
         const response = await fetch(`/api/transaction/${ids[0]}/details`);
         const txn = await response.json();
+
+        // Show applied date section and pre-fill if set
+        document.getElementById('appliedDateSection').style.display = 'block';
+        if (txn.applied_date) {
+            document.getElementById('editAppliedDate').value = txn.applied_date;
+        }
+
+        // Show payment splits section for payment transactions
+        if (txn.is_payment) {
+            document.getElementById('paymentSplitsSection').style.display = 'block';
+            if (txn.payment_splits && txn.payment_splits.length > 0) {
+                txn.payment_splits.forEach(s => addSplitRow(s.applied_date, s.amount, s.note || ''));
+            }
+        }
 
         // Fill Description and Category
         document.getElementById('editDesc').value = txn.description || '';
@@ -1772,12 +1833,28 @@ async function submitEdit() {
     const checked = document.querySelectorAll('.expense-check:checked, .payment-check:checked');
     const ids = Array.from(checked).map(c => c.value);
     
-    const payload = { 
-        ids, 
-        description: document.getElementById('editDesc').value, 
-        category: document.getElementById('editCategory').value, 
-        status 
+    const payload = {
+        ids,
+        description: document.getElementById('editDesc').value,
+        category: document.getElementById('editCategory').value,
+        status
     };
+
+    // Include applied_date and payment_splits only for single-transaction edits
+    if (ids.length === 1) {
+        payload.applied_date = document.getElementById('editAppliedDate').value || null;
+
+        const splitsSection = document.getElementById('paymentSplitsSection');
+        if (splitsSection.style.display !== 'none') {
+            payload.payment_splits = Array.from(
+                document.querySelectorAll('#splitRowsContainer .split-row')
+            ).map(row => ({
+                date:   row.querySelector('.split-date').value,
+                amount: parseFloat(row.querySelector('.split-amount').value) || 0,
+                note:   row.querySelector('.split-note').value
+            })).filter(s => s.date && s.amount > 0);
+        }
+    }
 
     if (status === 'shared') {
         payload.is_shared = 1;
@@ -1872,12 +1949,32 @@ function setViewMode(mode) {
     loadSummary(); 
 }
 
+function clearSharedFilters() {
+    document.getElementById('sharedYearFilter').value = '';
+    document.getElementById('sharedMonthFilter').value = '';
+    loadSharedLedger();
+}
+
 async function loadSharedLedger() {
+    // Populate year dropdown once (idempotent)
+    const yearSel = document.getElementById('sharedYearFilter');
+    if (yearSel.options.length <= 1) {
+        const curYear = new Date().getFullYear();
+        for (let y = curYear - 2; y <= curYear; y++) {
+            const opt = document.createElement('option');
+            opt.value = y; opt.text = y;
+            yearSel.appendChild(opt);
+        }
+    }
+
     try {
         const person = document.getElementById('sharedPersonFilter').value;
-        const response = await fetch(`/api/shared-ledger?person=${person}`);
+        const year   = document.getElementById('sharedYearFilter').value;
+        const month  = document.getElementById('sharedMonthFilter').value;
+        const params = new URLSearchParams({ person, year, month });
+        const response = await fetch(`/api/shared-ledger?${params}`);
         const data = await response.json();
-        
+
         // 1. Update Person Dropdown
         const personSelect = document.getElementById('sharedPersonFilter');
         const currentVal = personSelect.value;
@@ -1912,15 +2009,18 @@ async function loadSharedLedger() {
             ledgerBody.innerHTML = data.ledger.map(row => {
                 const isPositive = row.net_change > 0;
                 const isPayment = row.is_payment === 1;
-                // If viewing all, show who the share is with for context
+                const isSplit = row.is_split;
                 const context = !person ? `<span style="color:#764ba2; font-size:0.85em;"> (${row.payer === 'Me' ? row.person_name : row.payer})</span>` : '';
+                const subtitle = isSplit
+                    ? `<span style="color:#e67e22;">Payment Split${row.split_note ? ': ' + row.split_note : ''}</span>`
+                    : (isPayment ? 'Settlement Payment' : 'Shared Expense');
                 return `
-                    <tr>
+                    <tr${isSplit ? ' style="background:#fffbf0;"' : ''}>
                         <td style="color: #888;">${formatDate(row.date)}</td>
                         <td>
                             <div style="font-weight: 600;">${row.description}${context}</div>
-                            <div style="font-size: 0.8em; color: #999;">${isPayment ? 'Settlement Payment' : 'Shared Expense'}</div>
-                            ${renderTxnTags(row)}
+                            <div style="font-size: 0.8em; color: #999;">${subtitle}</div>
+                            ${isSplit ? '' : renderTxnTags(row)}
                         </td>
                         <td>${row.payer === 'Me' ? 'I paid' : row.payer + ' paid'}</td>
                         <td style="text-align: right; font-weight: bold; color: ${isPositive ? '#27ae60' : '#e74c3c'};">
@@ -1952,6 +2052,17 @@ async function loadSharedLedger() {
             label.textContent = person ? "You are all settled up!" : "All Settled Up (Global)";
             card.style.background = "#27ae60";
             val.textContent = "$0.00";
+        }
+
+        // Show period net when a month filter is active
+        const monthTotalEl = document.getElementById('sharedMonthTotal');
+        if (data.is_filtered && monthTotalEl) {
+            const mn = data.month_net;
+            const sign = mn >= 0 ? '+' : '-';
+            const color = mn >= 0 ? 'var(--pos)' : 'var(--neg)';
+            monthTotalEl.innerHTML = `Period net: <strong style="color:${color};">${sign}$${Math.abs(mn).toFixed(2)}</strong>`;
+        } else if (monthTotalEl) {
+            monthTotalEl.textContent = '';
         }
 
     } catch (error) {

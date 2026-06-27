@@ -203,6 +203,24 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # Applied date override: lets user re-attribute a transaction to a specific date for charting
+    try:
+        cursor.execute('ALTER TABLE transactions ADD COLUMN applied_date TEXT')
+    except sqlite3.OperationalError:
+        pass
+
+    # Payment splits: divide a lump payment into date-specific portions for charting and ledger display
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS payment_splits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER NOT NULL,
+            amount DECIMAL(10, 2) NOT NULL,
+            applied_date TEXT NOT NULL,
+            note TEXT,
+            FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+        )
+    ''')
+
     # Plaid integration: one row per connected bank account
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS plaid_accounts (
@@ -420,24 +438,24 @@ def get_detailed_breakdown(year, month):
     
     def fetch_data(yr, mo=None):
         sql = '''
-            SELECT category, 
-                   -- GROSS: Full amount if I paid, OR just my share if they paid
-                   SUM(CASE 
-                        WHEN payer = 'Me' THEN amount 
-                        ELSE COALESCE(reimbursement_amount, 0)
+            SELECT category,
+                   -- GROSS: Cash you paid out (payer='Me' full amounts only)
+                   SUM(CASE
+                        WHEN payer = 'Me' THEN amount
+                        ELSE 0
                    END) as gross,
-                   
-                   -- NET: My portion if I paid, OR my portion if they paid
-                   SUM(CASE 
+
+                   -- NET: Your true obligation (your share of everything)
+                   SUM(CASE
                         WHEN payer = 'Me' THEN (amount - COALESCE(reimbursement_amount, 0))
                         ELSE COALESCE(reimbursement_amount, 0)
                    END) as net
-            FROM transactions 
-            WHERE strftime('%Y', date) = ? AND is_payment = 0
+            FROM transactions
+            WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0
         '''
         params = [yr]
         if mo:
-            sql += " AND strftime('%m', date) = ?"
+            sql += " AND strftime('%m', COALESCE(applied_date, date)) = ?"
             params.append(mo)
         
         sql += " GROUP BY category"
@@ -448,22 +466,22 @@ def get_detailed_breakdown(year, month):
     year_totals = fetch_data(year)
     
     # 1. Determine how many months have actually elapsed/recorded in this year
-    cursor.execute("SELECT COUNT(DISTINCT strftime('%m', date)) FROM transactions WHERE strftime('%Y', date) = ? AND is_payment = 0", (year,))
+    cursor.execute("SELECT COUNT(DISTINCT strftime('%m', COALESCE(applied_date, date))) FROM transactions WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0", (year,))
     months_in_year = cursor.fetchone()[0] or 1 # Avoid division by zero
 
     # 2. Averages logic: Total / months_in_year (consistent across all categories)
     cursor.execute('''
-        SELECT category, 
-               SUM(CASE 
-                    WHEN payer = 'Me' THEN amount 
-                    ELSE COALESCE(reimbursement_amount, 0)
+        SELECT category,
+               SUM(CASE
+                    WHEN payer = 'Me' THEN amount
+                    ELSE 0
                END) / ? as gross_avg,
-               SUM(CASE 
+               SUM(CASE
                     WHEN payer = 'Me' THEN (amount - COALESCE(reimbursement_amount, 0))
                     ELSE COALESCE(reimbursement_amount, 0)
                END) / ? as net_avg
-        FROM transactions 
-        WHERE strftime('%Y', date) = ? AND is_payment = 0
+        FROM transactions
+        WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0
         GROUP BY category
     ''', (months_in_year, months_in_year, year))
     year_averages = {row['category']: {"gross": row['gross_avg'] or 0, "net": row['net_avg'] or 0} for row in cursor.fetchall()}
@@ -493,12 +511,12 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y'):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    amount_sql_case = f'''
-        CASE
-            WHEN payer = 'Me' THEN {"amount" if view_mode == "gross" else "(amount - COALESCE(reimbursement_amount, 0))"}
-            ELSE COALESCE(reimbursement_amount, 0)
-        END
-    '''
+    if view_mode == 'gross':
+        # Gross = cash you actually paid (payer='Me' only). Others-paid expenses aren't your cash outflow yet.
+        amount_sql_case = "CASE WHEN payer = 'Me' THEN amount ELSE 0 END"
+    else:
+        # Net = your true obligation: your share of everything regardless of who paid upfront.
+        amount_sql_case = "CASE WHEN payer = 'Me' THEN (amount - COALESCE(reimbursement_amount, 0)) ELSE COALESCE(reimbursement_amount, 0) END"
 
     end_date = datetime(int(year), int(month), 1)
 
@@ -516,7 +534,7 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y'):
     category_placeholders = ",".join(["?"] * len(TRACKED_CATEGORIES))
     sql = f'''
         SELECT category, SUM({amount_sql_case}) as total FROM transactions
-        WHERE strftime('%Y', date) = ? AND strftime('%m', date) = ?
+        WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND strftime('%m', COALESCE(applied_date, date)) = ?
         AND is_payment = 0 AND category IN ({category_placeholders})
         GROUP BY category
     '''
