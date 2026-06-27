@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spending Tracker — Sign In</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .login-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 40px 44px;
+            width: 100%;
+            max-width: 380px;
+        }
+        .login-card h1 { text-align: center; font-size: 1.3em; margin-bottom: 6px; }
+        .login-card .subtitle { text-align: center; margin-bottom: 28px; }
+        .login-field { margin-bottom: 16px; }
+        .login-field label { display: block; font-size: 0.85em; color: var(--muted); margin-bottom: 6px; }
+        .login-field input {
+            width: 100%; box-sizing: border-box;
+            padding: 10px 12px;
+            background: var(--field); color: var(--ink);
+            border: 1px solid var(--border); border-radius: 7px;
+            font-size: 0.95em; font-family: inherit;
+        }
+        .login-field input:focus { outline: none; border-color: var(--accent); }
+        .login-submit {
+            width: 100%; padding: 11px;
+            background: var(--accent); color: #fff;
+            border: none; border-radius: 7px;
+            font-size: 1em; font-weight: 600; cursor: pointer;
+            margin-top: 6px;
+        }
+        .login-submit:hover { opacity: 0.9; }
+        .login-error {
+            background: rgba(232, 123, 97, 0.15);
+            border: 1px solid var(--neg);
+            color: var(--neg);
+            border-radius: 7px;
+            padding: 9px 12px;
+            font-size: 0.875em;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1>Spending Tracker</h1>
+        <p class="subtitle" style="color: var(--muted); font-size: 0.9em;">Sign in to your account</p>
+
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="login-error">{{ messages[0] }}</div>
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST">
+            <div class="login-field">
+                <label for="email">Email</label>
+                <input id="email" name="email" type="email" autocomplete="email" autofocus required>
+            </div>
+            <div class="login-field">
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="login-submit">Sign In</button>
+        </form>
+    </div>
+</body>
+</html>

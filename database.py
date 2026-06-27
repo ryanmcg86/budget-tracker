@@ -3,8 +3,9 @@ from datetime import datetime
 
 DB_NAME = 'budget.db'
 
-# The 10 categories tracked on the Overview tab (mirrors TRACKED_CATEGORIES in main.js)
-TRACKED_CATEGORIES = [
+# Default seed list — used only to populate the categories table on first run.
+# The live source of truth is the categories table; call get_categories() instead.
+DEFAULT_CATEGORIES = [
     'Streaming',
     'Transportation',
     'Food/Drink',
@@ -17,6 +18,18 @@ TRACKED_CATEGORIES = [
     'Miscellaneous/Infrequent'
 ]
 
+# Legacy alias so any import of TRACKED_CATEGORIES still works until fully migrated.
+TRACKED_CATEGORIES = DEFAULT_CATEGORIES
+
+
+def get_categories(user_id=1):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT name FROM categories WHERE user_id = ? ORDER BY display_order, id', (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [r['name'] for r in rows]
+
 def get_db_connection():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
@@ -26,6 +39,20 @@ def init_db():
     """Initialize the database with required tables"""
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            email         TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            display_name  TEXT,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN display_name TEXT')
+    except sqlite3.OperationalError:
+        pass
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS transactions (
@@ -88,6 +115,16 @@ def init_db():
             parent_category TEXT
         )
     ''')
+    # Migration: add display_order if missing
+    try:
+        cursor.execute('ALTER TABLE categories ADD COLUMN display_order INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    # Seed defaults if the table is empty
+    cursor.execute('SELECT COUNT(*) FROM categories')
+    if cursor.fetchone()[0] == 0:
+        for i, name in enumerate(DEFAULT_CATEGORIES):
+            cursor.execute('INSERT OR IGNORE INTO categories (name, display_order) VALUES (?, ?)', (name, i))
  
     # Create index on date for faster queries
     cursor.execute('''
@@ -245,13 +282,22 @@ def init_db():
         )
     ''')
 
+    # User isolation: add user_id to all user-scoped tables and backfill existing rows to user 1
+    for _tbl in ['transactions', 'categories', 'settlements', 'transaction_shares',
+                 'tags', 'tag_defaults', 'payment_splits', 'plaid_accounts', 'breakdown_views']:
+        try:
+            cursor.execute(f'ALTER TABLE {_tbl} ADD COLUMN user_id INTEGER REFERENCES users(id)')
+        except sqlite3.OperationalError:
+            pass
+        cursor.execute(f'UPDATE {_tbl} SET user_id = 1 WHERE user_id IS NULL')
+
     conn.commit()
     conn.close()
 
     clean_account_names()
 
 
-def insert_transactions(transactions):
+def insert_transactions(transactions, user_id=1):
     """
     Inserts a list of tuples into the transactions table.
     Each tuple: (date, description, amount, bank_category, bank_category, merchant, card_name, is_payment)
@@ -263,9 +309,9 @@ def insert_transactions(transactions):
 
     cursor.executemany('''
         INSERT OR IGNORE INTO transactions
-            (date, description, amount, category, bank_category, merchant, card_name, is_payment)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', transactions)
+            (date, description, amount, category, bank_category, merchant, card_name, is_payment, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', [t + (user_id,) for t in transactions])
 
     inserted = cursor.rowcount
     conn.commit()
@@ -432,10 +478,10 @@ def get_detailed_summary(year, month=None):
 #    conn.close()
 
 
-def get_detailed_breakdown(year, month):
+def get_detailed_breakdown(year, month, user_id=1):
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     def fetch_data(yr, mo=None):
         sql = '''
             SELECT category,
@@ -451,22 +497,22 @@ def get_detailed_breakdown(year, month):
                         ELSE COALESCE(reimbursement_amount, 0)
                    END) as net
             FROM transactions
-            WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0
+            WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0 AND user_id = ?
         '''
-        params = [yr]
+        params = [yr, user_id]
         if mo:
             sql += " AND strftime('%m', COALESCE(applied_date, date)) = ?"
             params.append(mo)
-        
+
         sql += " GROUP BY category"
         cursor.execute(sql, params)
         return {row['category']: {"gross": row['gross'] or 0, "net": row['net'] or 0} for row in cursor.fetchall()}
 
     month_totals = fetch_data(year, month)
     year_totals = fetch_data(year)
-    
+
     # 1. Determine how many months have actually elapsed/recorded in this year
-    cursor.execute("SELECT COUNT(DISTINCT strftime('%m', COALESCE(applied_date, date))) FROM transactions WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0", (year,))
+    cursor.execute("SELECT COUNT(DISTINCT strftime('%m', COALESCE(applied_date, date))) FROM transactions WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0 AND user_id = ?", (year, user_id))
     months_in_year = cursor.fetchone()[0] or 1 # Avoid division by zero
 
     # 2. Averages logic: Total / months_in_year (consistent across all categories)
@@ -481,9 +527,9 @@ def get_detailed_breakdown(year, month):
                     ELSE COALESCE(reimbursement_amount, 0)
                END) / ? as net_avg
         FROM transactions
-        WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0
+        WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND is_payment = 0 AND user_id = ?
         GROUP BY category
-    ''', (months_in_year, months_in_year, year))
+    ''', (months_in_year, months_in_year, year, user_id))
     year_averages = {row['category']: {"gross": row['gross_avg'] or 0, "net": row['net_avg'] or 0} for row in cursor.fetchall()}
     
     conn.close()
@@ -494,7 +540,7 @@ def get_detailed_breakdown(year, month):
     }
 
 
-def get_overview_history(year, month, view_mode='gross', time_range='1y'):
+def get_overview_history(year, month, view_mode='gross', time_range='1y', user_id=1):
     """
     Returns spending per month, broken down by category (within
     TRACKED_CATEGORIES), for a range of months ending at the given
@@ -531,26 +577,27 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y'):
     else:  # default to '1y'
         start_date = end_date - relativedelta(months=11)
 
-    category_placeholders = ",".join(["?"] * len(TRACKED_CATEGORIES))
+    categories = get_categories(user_id)
+    category_placeholders = ",".join(["?"] * len(categories))
     sql = f'''
         SELECT category, SUM({amount_sql_case}) as total FROM transactions
         WHERE strftime('%Y', COALESCE(applied_date, date)) = ? AND strftime('%m', COALESCE(applied_date, date)) = ?
-        AND is_payment = 0 AND category IN ({category_placeholders})
+        AND is_payment = 0 AND user_id = ? AND category IN ({category_placeholders})
         GROUP BY category
     '''
 
     months = []
-    series = {cat: [] for cat in TRACKED_CATEGORIES}
+    series = {cat: [] for cat in categories}
 
     current_date = start_date
     while current_date <= end_date:
         yr, mo = current_date.strftime('%Y'), current_date.strftime('%m')
         months.append(current_date.strftime('%b %Y'))
 
-        cursor.execute(sql, (yr, mo, *TRACKED_CATEGORIES))
+        cursor.execute(sql, (yr, mo, user_id, *categories))
         month_totals = {row['category']: row['total'] or 0 for row in cursor.fetchall()}
 
-        for cat in TRACKED_CATEGORIES:
+        for cat in categories:
             series[cat].append(month_totals.get(cat, 0))
 
         current_date += relativedelta(months=1)

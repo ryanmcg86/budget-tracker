@@ -3,10 +3,15 @@ let savedPeople = []; // Global list of names
 let allTransactions = []; // Global variable to hold data for filtering
 let isModalPaymentMode = false; // Tracks if the current modal is for a payment
 
-// 1. The Master List (Source of Truth lives in database.py's TRACKED_CATEGORIES list;
-// index.html injects it as a JSON data island, parsed here so there's only one
-// place to edit the category list and no fetch/race condition to worry about)
-const TRACKED_CATEGORIES = JSON.parse(document.getElementById('trackedCategoriesData').textContent);
+// Populated from the JSON embed on page load; updated via loadCategories() after any mutation.
+let TRACKED_CATEGORIES = JSON.parse(document.getElementById('trackedCategoriesData').textContent);
+
+async function loadCategories() {
+    const res = await fetch('/api/categories');
+    TRACKED_CATEGORIES = await res.json();
+    setupCategoryDropdowns();
+    renderCategoryList();
+}
 
 const PAYMENT_CATEGORIES = ['Work', 'Venmo Payment', 'Investment Return', 'Gift', 'Other'];
 
@@ -2342,13 +2347,16 @@ async function removeTag(txnId, tagId) {
 window.onclick = function(event) {
     const modal = document.getElementById('editModal');
     const addModal = document.getElementById('addModal');
-    const tagModal = document.getElementById('tagModal'); // Include the tag modal
+    const tagModal = document.getElementById('tagModal');
+    const settingsModal = document.getElementById('settingsModal');
     if (event.target == modal) {
         closeEditModal();
     } else if (event.target == addModal) {
         closeAddModal();
-    } else if (event.target == tagModal) { // Close tag modal if clicked outside
+    } else if (event.target == tagModal) {
         closeTagModal();
+    } else if (event.target == settingsModal) {
+        closeSettingsModal();
     }
 }
 //---------------------------------------------------------------
@@ -3097,8 +3105,10 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // 2. IMPORTANT: Wait for the data to actually arrive from the database
     // This populates the 'allTransactions' variable
-    await loadFullTransactions(); 
-    await refreshSavedPeople(); // Load saved people for shared expenses and edits
+    await loadFullTransactions();
+    await refreshSavedPeople();
+    // Populate header greeting from stored display name / email
+    fetch('/api/account').then(r => r.json()).then(d => updateHeaderName(d.display_name || d.email));
     
     // 3. Now that data is present, build the dynamic bank/account filters
     updateBankCategoryDropdown();
@@ -3116,3 +3126,242 @@ document.addEventListener('DOMContentLoaded', async function() {
     loadPlaidAccounts();
     initPlaidLink();
 });
+
+// ── Settings modal ────────────────────────────────────────────────────────────
+
+let settingsTab = 'account';
+
+function openSettingsModal() {
+    document.getElementById('settingsModal').style.display = 'block';
+    switchSettingsTab(settingsTab);
+}
+
+function closeSettingsModal() {
+    document.getElementById('settingsModal').style.display = 'none';
+    // Clear sensitive fields
+    ['acctCurrentPw', 'acctNewPw', 'acctConfirmPw', 'acctDeleteConfirm'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    ['profileMsg', 'passwordMsg', 'deleteMsg'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '';
+    });
+}
+
+function switchSettingsTab(tab) {
+    settingsTab = tab;
+    document.getElementById('settingsPanelAccount').style.display    = tab === 'account'    ? 'block' : 'none';
+    document.getElementById('settingsPanelCategories').style.display = tab === 'categories' ? 'block' : 'none';
+
+    const acctBtn = document.getElementById('stAccount');
+    const catBtn  = document.getElementById('stCategories');
+    if (tab === 'account') {
+        acctBtn.style.background = 'var(--surface-2)'; acctBtn.style.color = 'var(--ink)';
+        catBtn.style.background  = 'none';             catBtn.style.color  = 'var(--muted)';
+        loadAccountSettings();
+    } else {
+        catBtn.style.background  = 'var(--surface-2)'; catBtn.style.color = 'var(--ink)';
+        acctBtn.style.background = 'none';              acctBtn.style.color = 'var(--muted)';
+        loadCategories();
+    }
+}
+
+async function loadAccountSettings() {
+    const res  = await fetch('/api/account');
+    const data = await res.json();
+    document.getElementById('acctDisplayName').value = data.display_name || '';
+    document.getElementById('acctEmail').value        = data.email || '';
+    updateHeaderName(data.display_name || data.email);
+}
+
+function updateHeaderName(name) {
+    const el = document.getElementById('headerDisplayName');
+    if (el) el.textContent = name ? `Hi, ${name.split(' ')[0]}` : '';
+}
+
+async function saveProfile() {
+    const display_name = document.getElementById('acctDisplayName').value.trim();
+    const email        = document.getElementById('acctEmail').value.trim();
+    const msg          = document.getElementById('profileMsg');
+    const res = await fetch('/api/account/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_name, email })
+    });
+    const data = await res.json();
+    if (res.ok) {
+        msg.style.color = 'var(--accent)';
+        msg.textContent = 'Saved.';
+        updateHeaderName(display_name || email);
+    } else {
+        msg.style.color = 'var(--neg)';
+        msg.textContent = data.error || 'Could not save.';
+    }
+    setTimeout(() => { msg.textContent = ''; }, 3000);
+}
+
+async function changePassword() {
+    const current  = document.getElementById('acctCurrentPw').value;
+    const newPw    = document.getElementById('acctNewPw').value;
+    const confirm  = document.getElementById('acctConfirmPw').value;
+    const msg      = document.getElementById('passwordMsg');
+    if (newPw !== confirm) {
+        msg.style.color = 'var(--neg)';
+        msg.textContent = 'New passwords do not match.';
+        return;
+    }
+    const res = await fetch('/api/account/password', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: current, new_password: newPw })
+    });
+    const data = await res.json();
+    if (res.ok) {
+        msg.style.color = 'var(--accent)';
+        msg.textContent = 'Password updated.';
+        ['acctCurrentPw', 'acctNewPw', 'acctConfirmPw'].forEach(id => document.getElementById(id).value = '');
+    } else {
+        msg.style.color = 'var(--neg)';
+        msg.textContent = data.error || 'Could not update password.';
+    }
+    setTimeout(() => { msg.textContent = ''; }, 4000);
+}
+
+function exportData() {
+    window.location.href = '/api/account/export';
+}
+
+async function closeAccount() {
+    const email = document.getElementById('acctDeleteConfirm').value.trim().toLowerCase();
+    const msg   = document.getElementById('deleteMsg');
+    if (!email) { msg.textContent = 'Please enter your email to confirm.'; return; }
+    const res = await fetch('/api/account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+    });
+    const data = await res.json();
+    if (res.ok) {
+        window.location.href = '/login';
+    } else {
+        msg.textContent = data.error || 'Could not delete account.';
+    }
+}
+
+// ── Category Management ───────────────────────────────────────────────────────
+
+function renderCategoryList() {
+    const ul = document.getElementById('categoryList');
+    if (!ul) return;
+    ul.innerHTML = TRACKED_CATEGORIES.map((cat, i) => `
+        <li data-name="${cat}" style="display:flex; align-items:center; gap:8px; padding:8px 0;
+            border-bottom:1px solid var(--border);">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+                <button onclick="moveCategoryUp(${i})" title="Move up"
+                    style="background:none; border:none; color:var(--muted); cursor:pointer;
+                           font-size:0.75em; line-height:1; padding:0; ${i === 0 ? 'opacity:0.2; pointer-events:none;' : ''}">▲</button>
+                <button onclick="moveCategoryDown(${i})" title="Move down"
+                    style="background:none; border:none; color:var(--muted); cursor:pointer;
+                           font-size:0.75em; line-height:1; padding:0; ${i === TRACKED_CATEGORIES.length - 1 ? 'opacity:0.2; pointer-events:none;' : ''}">▼</button>
+            </div>
+            <span id="cat-label-${i}" style="flex:1; color:var(--ink);">${cat}</span>
+            <input id="cat-input-${i}" type="text" value="${cat}"
+                   style="flex:1; display:none; padding:5px 8px; border-radius:5px;
+                          border:1px solid var(--border); background:var(--field); color:var(--ink);"
+                   onkeydown="if(event.key==='Enter') confirmRename(${i}); if(event.key==='Escape') cancelRename(${i});">
+            <button id="cat-edit-${i}" onclick="startRename(${i})"
+                    style="background:none; border:none; color:var(--edit); cursor:pointer; font-size:0.9em;">✎</button>
+            <button id="cat-save-${i}" onclick="confirmRename(${i})"
+                    style="display:none; background:none; border:none; color:var(--accent); cursor:pointer; font-size:0.9em; font-weight:600;">Save</button>
+            <button onclick="deleteCategory('${cat}')"
+                    style="background:none; border:none; color:var(--neg); cursor:pointer; font-size:1em;">✕</button>
+        </li>
+    `).join('');
+}
+
+function startRename(i) {
+    document.getElementById(`cat-label-${i}`).style.display = 'none';
+    document.getElementById(`cat-edit-${i}`).style.display = 'none';
+    document.getElementById(`cat-input-${i}`).style.display = 'inline-block';
+    document.getElementById(`cat-save-${i}`).style.display = 'inline-block';
+    document.getElementById(`cat-input-${i}`).focus();
+}
+
+function cancelRename(i) {
+    document.getElementById(`cat-label-${i}`).style.display = '';
+    document.getElementById(`cat-edit-${i}`).style.display = '';
+    document.getElementById(`cat-input-${i}`).style.display = 'none';
+    document.getElementById(`cat-save-${i}`).style.display = 'none';
+}
+
+async function confirmRename(i) {
+    const oldName = TRACKED_CATEGORIES[i];
+    const newName = document.getElementById(`cat-input-${i}`).value.trim();
+    if (!newName || newName === oldName) { cancelRename(i); return; }
+    const res = await fetch(`/api/categories/${encodeURIComponent(oldName)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName })
+    });
+    if (res.ok) {
+        await loadCategories();
+        loadSummary();
+        loadFullTransactions();
+    } else {
+        alert('Could not rename category.');
+        cancelRename(i);
+    }
+}
+
+async function addCategory() {
+    const input = document.getElementById('newCategoryInput');
+    const name = input.value.trim();
+    if (!name) return;
+    const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+    });
+    if (res.ok) {
+        input.value = '';
+        await loadCategories();
+    } else {
+        alert('Category already exists.');
+    }
+}
+
+async function deleteCategory(name) {
+    const res = await fetch(`/api/categories/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (res.status === 409) {
+        const data = await res.json();
+        if (!confirm(`"${name}" is used by ${data.count} transaction(s). They will become uncategorized. Delete anyway?`)) return;
+        await fetch(`/api/categories/${encodeURIComponent(name)}?confirm=1`, { method: 'DELETE' });
+    }
+    await loadCategories();
+    loadSummary();
+}
+
+async function moveCategoryUp(i) {
+    if (i === 0) return;
+    const order = [...TRACKED_CATEGORIES];
+    [order[i - 1], order[i]] = [order[i], order[i - 1]];
+    await fetch('/api/categories/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order })
+    });
+    await loadCategories();
+}
+
+async function moveCategoryDown(i) {
+    if (i === TRACKED_CATEGORIES.length - 1) return;
+    const order = [...TRACKED_CATEGORIES];
+    [order[i], order[i + 1]] = [order[i + 1], order[i]];
+    await fetch('/api/categories/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order })
+    });
+    await loadCategories();
+}

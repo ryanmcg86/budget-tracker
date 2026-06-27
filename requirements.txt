@@ -1,4 +1,6 @@
 Flask==3.0.0
+flask-login
+bcrypt
 pandas==2.0.3
 plotly==5.18.0
 python-dotenv

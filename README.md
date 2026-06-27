@@ -1,4 +1,4 @@
-# Budget Tracker
+# Spending Tracker
 
 A personal finance web app built with Flask and SQLite. Transactions can be imported via CSV upload or fetched live from connected bank accounts through the Plaid API. The app tracks spending by category, handles shared expenses and bill splitting across multiple people, and provides detailed breakdowns with tagging and saved views.
 
@@ -7,7 +7,7 @@ A personal finance web app built with Flask and SQLite. Transactions can be impo
 ## Project Structure
 
 ```
-budget-tracker/
+spending-tracker/
 ├── app.py                  # Flask application — all API routes
 ├── database.py             # Database schema, migrations, and query helpers
 ├── plaid_integration.py    # Plaid API client (link tokens, token exchange, transaction fetch)

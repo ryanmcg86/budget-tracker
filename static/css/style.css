@@ -1,5 +1,5 @@
 /* ============================================================
-   Budget Tracker — Restyled
+   Spending Tracker — Restyled
    Sleek / professional fintech direction.
    Drop-in replacement: targets the SAME selectors & IDs as before,
    so all tables, tabs, filters, modals and JS hooks keep working.
@@ -59,11 +59,13 @@ body {
 
 /* ---------- Header ---------- */
 header {
-    text-align: left;
+    text-align: center;
     margin-bottom: 30px;
     padding-bottom: 0;
     border-bottom: none;
 }
+
+#gearBtn:hover { color: var(--ink) !important; }
 
 h1 {
     color: var(--ink);
@@ -101,7 +103,7 @@ h4 {
 /* ---------- Tab navigation ---------- */
 .tab-nav {
     display: inline-flex;
-    justify-content: flex-start;
+    justify-content: center;
     gap: 3px;
     background: var(--canvas);
     border: 1px solid var(--border);

@@ -1,16 +1,22 @@
 from flask import Flask, render_template, request, jsonify
+from flask_login import login_required, current_user
 import pandas as pd
 import sqlite3
 import os
 from datetime import datetime
 from dotenv import load_dotenv
 from database import init_db, insert_transactions, get_monthly_summary
+from auth import auth_bp, login_manager
 
 load_dotenv()
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24))
+
+login_manager.init_app(app)
+app.register_blueprint(auth_bp)
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -18,10 +24,21 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # Initialize database
 init_db()
 
+@app.before_request
+def require_login():
+    from flask_login import current_user
+    from flask import request as req
+    # Allow login/logout and static files through without auth
+    if req.endpoint and (req.endpoint.startswith('auth.') or req.endpoint == 'static'):
+        return
+    if not current_user.is_authenticated:
+        from flask import redirect, url_for
+        return redirect(url_for('auth.login'))
+
 @app.route('/')
 def index():
-    from database import TRACKED_CATEGORIES
-    return render_template('index.html', tracked_categories=TRACKED_CATEGORIES)
+    from database import get_categories
+    return render_template('index.html', tracked_categories=get_categories())
 
 @app.route('/upload', methods=['POST'])
 def upload_csv():
@@ -47,7 +64,7 @@ def upload_csv():
                 df = pd.read_csv(file, encoding='latin1')
             
             # UPDATED: Pass the user-selected bank_name instead of file.filename
-            count = process_csv(df, card_name=bank_name)
+            count = process_csv(df, card_name=bank_name, user_id=current_user.id)
             
             return jsonify({
                 'success': True,
@@ -68,7 +85,7 @@ def get_summary():
     summary = get_monthly_summary()
     return jsonify(summary)
 
-def process_csv(df, card_name="Unknown"):
+def process_csv(df, card_name="Unknown", user_id=1):
     # 1. Standardize headers
     df.columns = [c.strip().lower() for c in df.columns]
     headers = df.columns
@@ -146,7 +163,7 @@ def process_csv(df, card_name="Unknown"):
 
     if final_data:
         from database import insert_transactions#, apply_rules_to_all
-        count = insert_transactions(final_data)
+        count = insert_transactions(final_data, user_id)
         #apply_rules_to_all()
         return count
     return 0
@@ -158,7 +175,7 @@ def toggle_shared(txn_id):
     conn = sqlite3.connect('budget.db')
     cursor = conn.cursor()
     # Flip the boolean
-    cursor.execute('UPDATE transactions SET is_shared = 1 - is_shared WHERE id = ?', (txn_id,))
+    cursor.execute('UPDATE transactions SET is_shared = 1 - is_shared WHERE id = ? AND user_id = ?', (txn_id, current_user.id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -177,7 +194,7 @@ def delete_transaction(txn_id):
         cursor.execute('DELETE FROM transaction_shares WHERE transaction_id = ?', (txn_id,))
 
         # 3. Delete the transaction record
-        cursor.execute('DELETE FROM transactions WHERE id = ?', (txn_id,))
+        cursor.execute('DELETE FROM transactions WHERE id = ? AND user_id = ?', (txn_id, current_user.id))
         conn.commit()
         conn.close()
         return jsonify({'success': True, 'message': 'Transaction deleted'})
@@ -185,12 +202,6 @@ def delete_transaction(txn_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/categories')
-def get_categories():
-    from database import get_category_breakdown
-    # This returns category and total_spent
-    categories = get_category_breakdown()
-    return jsonify(categories)
 
 @app.route('/api/rules', methods=['GET', 'POST'])
 def manage_rules():
@@ -222,7 +233,7 @@ def detailed_summary():
     month = request.args.get('month')
     
     from database import get_detailed_breakdown
-    data = get_detailed_breakdown(year, month)
+    data = get_detailed_breakdown(year, month, current_user.id)
     return jsonify(data)
 
 @app.route('/api/overview-history')
@@ -233,13 +244,14 @@ def overview_history():
     time_range = request.args.get('time_range', '1y')
 
     from database import get_overview_history
-    data = get_overview_history(year, month, view_mode, time_range)
+    data = get_overview_history(year, month, view_mode, time_range, current_user.id)
     return jsonify(data)
 
 
 @app.route('/api/sankey-data')
 def sankey_data():
-    from database import get_db_connection, TRACKED_CATEGORIES
+    from database import get_db_connection, get_categories
+    TRACKED_CATEGORIES = get_categories(current_user.id)
     from dateutil.relativedelta import relativedelta
     from calendar import monthrange
 
@@ -274,10 +286,10 @@ def sankey_data():
     cur.execute(f'''
         SELECT COALESCE(SUM(ABS(amount)), 0)
         FROM transactions t
-        WHERE t.is_payment = 1 {shared_filter}
+        WHERE t.is_payment = 1 AND t.user_id = ? {shared_filter}
           AND NOT EXISTS (SELECT 1 FROM payment_splits WHERE transaction_id = t.id)
           AND COALESCE(t.applied_date, t.date) >= ? AND COALESCE(t.applied_date, t.date) <= ?
-    ''', (start_str, end_str))
+    ''', (current_user.id, start_str, end_str))
     income = cur.fetchone()[0]
 
     # Split payments: sum each split's amount within the date range
@@ -285,9 +297,9 @@ def sankey_data():
         SELECT COALESCE(SUM(ps.amount), 0)
         FROM payment_splits ps
         JOIN transactions t ON ps.transaction_id = t.id
-        WHERE t.is_payment = 1 {shared_filter}
+        WHERE t.is_payment = 1 AND t.user_id = ? {shared_filter}
           AND ps.applied_date >= ? AND ps.applied_date <= ?
-    ''', (start_str, end_str))
+    ''', (current_user.id, start_str, end_str))
     income += cur.fetchone()[0]
 
     # Gross = cash you actually paid out (payer='Me' only, full amounts; others-paid = not your cash yet).
@@ -306,35 +318,32 @@ def sankey_data():
     cur.execute(f'''
         SELECT category, SUM({amount_case}) as total
         FROM transactions
-        WHERE is_payment = 0
+        WHERE is_payment = 0 AND user_id = ?
           AND COALESCE(applied_date, date) >= ? AND COALESCE(applied_date, date) <= ?
           AND category IN ({placeholders})
         GROUP BY category
         HAVING total > 0
         ORDER BY total DESC
-    ''', (start_str, end_str, *TRACKED_CATEGORIES))
+    ''', (current_user.id, start_str, end_str, *TRACKED_CATEGORIES))
     categories = [{'name': r['category'], 'total': round(r['total'], 2)} for r in cur.fetchall()]
 
     # Capture expenses that fall outside TRACKED_CATEGORIES so the totals match reality
     cur.execute(f'''
         SELECT COALESCE(SUM({amount_case}), 0) as total
         FROM transactions
-        WHERE is_payment = 0
+        WHERE is_payment = 0 AND user_id = ?
           AND COALESCE(applied_date, date) >= ? AND COALESCE(applied_date, date) <= ?
           AND (category IS NULL OR category = '' OR category NOT IN ({placeholders}))
-    ''', (start_str, end_str, *TRACKED_CATEGORIES))
+    ''', (current_user.id, start_str, end_str, *TRACKED_CATEGORIES))
     uncategorized = round(cur.fetchone()[0], 2)
     if uncategorized > 0.01:
         categories.append({'name': 'Uncategorized', 'total': uncategorized})
 
-    # Count distinct months that actually have data in the queried window.
-    # Used by the frontend to compute per-month averages accurately
-    # (e.g. "5Y" with only 6 months of real data averages over 6, not 60).
     cur.execute('''
         SELECT COUNT(DISTINCT strftime('%Y-%m', COALESCE(applied_date, date)))
         FROM transactions
-        WHERE COALESCE(applied_date, date) >= ? AND COALESCE(applied_date, date) <= ?
-    ''', (start_str, end_str))
+        WHERE user_id = ? AND COALESCE(applied_date, date) >= ? AND COALESCE(applied_date, date) <= ?
+    ''', (current_user.id, start_str, end_str))
     months_in_range = max(1, cur.fetchone()[0])
 
     conn.close()
@@ -351,7 +360,7 @@ def toggle_payment(txn_id):
     from database import get_db_connection
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE transactions SET is_payment = 1 - is_payment WHERE id = ?', (txn_id,))
+    cursor.execute('UPDATE transactions SET is_payment = 1 - is_payment WHERE id = ? AND user_id = ?', (txn_id, current_user.id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -373,19 +382,20 @@ def add_manual_transaction():
         shares = data.get('shares', [])
 
         cursor.execute('''
-            INSERT INTO transactions 
-            (date, description, amount, category, bank_category, card_name, is_payment, is_shared, payer, is_manual_category)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            INSERT INTO transactions
+            (date, description, amount, category, bank_category, card_name, is_payment, is_shared, payer, is_manual_category, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         ''', (
-            data['date'], 
-            data['description'], 
-            data['amount'], 
-            data['category'], 
-            data['category'], 
+            data['date'],
+            data['description'],
+            data['amount'],
+            data['category'],
+            data['category'],
             data['account'],
             is_pay,
             is_shared,
-            payer
+            payer,
+            current_user.id
         ))
         txn_id = cursor.lastrowid
 
@@ -431,23 +441,23 @@ def bulk_edit_transactions():
             # 1. Update description/merchant only if a new one was provided
             if new_desc:
                 cursor.execute('''
-                    UPDATE transactions 
-                    SET description = ?, merchant = ? 
-                    WHERE id = ?
-                ''', (new_desc, new_desc, txn_id))
-            
+                    UPDATE transactions
+                    SET description = ?, merchant = ?
+                    WHERE id = ? AND user_id = ?
+                ''', (new_desc, new_desc, txn_id, current_user.id))
+
             # 2. Update category only if a value was selected
             if new_cat:
                 cursor.execute('''
                     UPDATE transactions
                     SET category = ?, is_manual_category = 1
-                    WHERE id = ?
-                ''', (new_cat, txn_id))
+                    WHERE id = ? AND user_id = ?
+                ''', (new_cat, txn_id, current_user.id))
 
             # 2b. Update applied_date if the key was sent (None clears the override)
             if 'applied_date' in data:
-                cursor.execute('UPDATE transactions SET applied_date = ? WHERE id = ?',
-                               (applied_date_raw or None, txn_id))
+                cursor.execute('UPDATE transactions SET applied_date = ? WHERE id = ? AND user_id = ?',
+                               (applied_date_raw or None, txn_id, current_user.id))
 
             # 2c. Save payment splits (sent only for single-transaction edits)
             if 'payment_splits' in data:
@@ -467,10 +477,10 @@ def bulk_edit_transactions():
 
                 # Update the basic flag and payer
                 cursor.execute('''
-                    UPDATE transactions 
-                    SET is_shared = ?, payer = ? 
-                    WHERE id = ?
-                ''', (is_shared, payer or 'Me', txn_id))
+                    UPDATE transactions
+                    SET is_shared = ?, payer = ?
+                    WHERE id = ? AND user_id = ?
+                ''', (is_shared, payer or 'Me', txn_id, current_user.id))
 
                 # Clean out any old shares for these transactions
                 cursor.execute('DELETE FROM transaction_shares WHERE transaction_id = ?', (txn_id,))
@@ -496,11 +506,12 @@ def bulk_edit_transactions():
                             cursor.execute('UPDATE settlements SET expense_share_id = ? WHERE expense_share_id = ?', (new_share_id, old_sid))
                     
                     # Update the total reimbursement sum so the Overview Toggle still works
-                    cursor.execute('UPDATE transactions SET reimbursement_amount = ? WHERE id = ?', 
-                                   (total_reimbursement, txn_id))
+                    cursor.execute('UPDATE transactions SET reimbursement_amount = ? WHERE id = ? AND user_id = ?',
+                                   (total_reimbursement, txn_id, current_user.id))
                 else:
                     # If set back to Personal, reset the reimbursement sum
-                    cursor.execute('UPDATE transactions SET reimbursement_amount = 0 WHERE id = ?', (txn_id,))
+                    cursor.execute('UPDATE transactions SET reimbursement_amount = 0 WHERE id = ? AND user_id = ?',
+                                   (txn_id, current_user.id))
         
         conn.commit()
         conn.close()
@@ -522,11 +533,12 @@ def shared_ledger():
     # 1. Get all unique people for the dropdown
     cursor.execute('''
         SELECT DISTINCT name FROM (
-            SELECT person_name as name FROM transaction_shares
+            SELECT ts.person_name as name FROM transaction_shares ts
+            JOIN transactions t ON ts.transaction_id = t.id WHERE t.user_id = ?
             UNION
-            SELECT payer as name FROM transactions
+            SELECT payer as name FROM transactions WHERE user_id = ?
         ) WHERE name != "Me" AND name IS NOT NULL AND name != "" ORDER BY name
-    ''')
+    ''', (current_user.id, current_user.id))
     all_people_names = [row['name'] for row in cursor.fetchall()]
 
     # Calculate balance for each person to categorize them
@@ -536,12 +548,12 @@ def shared_ledger():
             SELECT SUM(CASE WHEN t.payer = 'Me' THEN ts.share_amount ELSE -ts.share_amount END) as balance
             FROM transactions t
             JOIN transaction_shares ts ON t.id = ts.transaction_id
-            WHERE t.is_shared = 1 AND (
+            WHERE t.is_shared = 1 AND t.user_id = ? AND (
                 (t.payer = 'Me' AND ts.person_name = ?) OR
                 (t.payer = ? AND ts.person_name = 'Me')
             )
         '''
-        cursor.execute(balance_sql, (person_name, person_name))
+        cursor.execute(balance_sql, (current_user.id, person_name, person_name))
         result = cursor.fetchone()
         balance = result['balance'] if result and result['balance'] is not None else 0
         people_with_balances.append({'name': person_name, 'balance': balance})
@@ -564,7 +576,7 @@ def shared_ledger():
                ts.share_amount, t.is_payment, ts.person_name
         FROM transactions t
         JOIN transaction_shares ts ON t.id = ts.transaction_id
-        WHERE t.is_shared = 1 AND (
+        WHERE t.is_shared = 1 AND t.user_id = ? AND (
             (t.payer = 'Me' AND ts.person_name != 'Me' {filter_clause_payer}) OR
             (t.payer != 'Me' AND ts.person_name = 'Me' {filter_clause_share})
         )
@@ -575,7 +587,10 @@ def shared_ledger():
     filter_share = "AND t.payer = ?" if person_filter else ""
 
     query = sql.format(filter_clause_payer=filter_payer, filter_clause_share=filter_share)
-    params = (person_filter, person_filter) if person_filter else ()
+    if person_filter:
+        params = (current_user.id, person_filter, person_filter)
+    else:
+        params = (current_user.id,)
 
     cursor.execute(query, params)
     rows = cursor.fetchall()
@@ -670,6 +685,189 @@ def shared_ledger():
     })
 
 
+@app.route('/api/account', methods=['GET'])
+def api_account_get():
+    from flask_login import current_user
+    from database import get_db_connection
+    conn = get_db_connection()
+    row = conn.execute('SELECT email, display_name FROM users WHERE id = ?', (current_user.id,)).fetchone()
+    conn.close()
+    return jsonify({'email': row['email'], 'display_name': row['display_name'] or ''})
+
+
+@app.route('/api/account/profile', methods=['PATCH'])
+def api_account_profile():
+    from flask_login import current_user
+    from database import get_db_connection
+    data = request.json or {}
+    display_name = data.get('display_name', '').strip()
+    email = data.get('email', '').strip().lower()
+    if not email:
+        return jsonify({'error': 'Email is required.'}), 400
+    conn = get_db_connection()
+    try:
+        conn.execute('UPDATE users SET display_name = ?, email = ? WHERE id = ?',
+                     (display_name or None, email, current_user.id))
+        conn.commit()
+    except Exception:
+        conn.close()
+        return jsonify({'error': 'That email is already in use.'}), 409
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/account/password', methods=['PATCH'])
+def api_account_password():
+    from flask_login import current_user
+    from database import get_db_connection
+    import bcrypt
+    data = request.json or {}
+    current_pw = data.get('current_password', '').encode()
+    new_pw     = data.get('new_password', '').encode()
+    if len(new_pw) < 8:
+        return jsonify({'error': 'New password must be at least 8 characters.'}), 400
+    conn = get_db_connection()
+    row = conn.execute('SELECT password_hash FROM users WHERE id = ?', (current_user.id,)).fetchone()
+    if not bcrypt.checkpw(current_pw, row['password_hash']):
+        conn.close()
+        return jsonify({'error': 'Current password is incorrect.'}), 403
+    new_hash = bcrypt.hashpw(new_pw, bcrypt.gensalt())
+    conn.execute('UPDATE users SET password_hash = ? WHERE id = ?', (new_hash, current_user.id))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/account/export', methods=['GET'])
+def api_account_export():
+    from database import get_db_connection
+    import csv, io
+    conn = get_db_connection()
+    rows = conn.execute('''
+        SELECT date, description, amount, category, card_name, payer,
+               reimbursement_amount, is_payment, is_shared, applied_date
+        FROM transactions
+        WHERE user_id = ?
+        ORDER BY COALESCE(applied_date, date) DESC
+    ''', (current_user.id,)).fetchall()
+    conn.close()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['Date', 'Description', 'Amount', 'Category', 'Account',
+                     'Payer', 'Reimbursement', 'Is Payment', 'Is Shared', 'Applied Date'])
+    for r in rows:
+        writer.writerow(list(r))
+    buf.seek(0)
+    from flask import Response
+    return Response(
+        buf.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=budget_export.csv'}
+    )
+
+
+@app.route('/api/account', methods=['DELETE'])
+def api_account_delete():
+    from flask_login import current_user, logout_user
+    from database import get_db_connection
+    data = request.json or {}
+    email_confirm = data.get('email', '').strip().lower()
+    conn = get_db_connection()
+    row = conn.execute('SELECT email FROM users WHERE id = ?', (current_user.id,)).fetchone()
+    if email_confirm != row['email']:
+        conn.close()
+        return jsonify({'error': 'Email does not match.'}), 403
+    # Delete all data belonging to this user
+    uid = current_user.id
+    # Child tables: delete rows whose parent transaction belongs to this user
+    for child in ['transaction_shares', 'settlements', 'payment_splits', 'transaction_tags']:
+        try:
+            conn.execute(f'DELETE FROM {child} WHERE transaction_id IN (SELECT id FROM transactions WHERE user_id = ?)', (uid,))
+        except Exception:
+            pass
+    # tag_defaults and tags are user-scoped directly
+    for tbl in ['tag_defaults', 'tags', 'plaid_accounts', 'transactions', 'categories']:
+        try:
+            conn.execute(f'DELETE FROM {tbl} WHERE user_id = ?', (uid,))
+        except Exception:
+            pass
+    conn.execute('DELETE FROM users WHERE id = ?', (current_user.id,))
+    conn.commit()
+    conn.close()
+    logout_user()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/categories', methods=['GET'])
+def api_list_categories():
+    from database import get_categories
+    return jsonify(get_categories(current_user.id))
+
+
+@app.route('/api/categories', methods=['POST'])
+def api_add_category():
+    from database import get_db_connection
+    name = (request.json or {}).get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT COALESCE(MAX(display_order), -1) + 1 FROM categories')
+    next_order = cur.fetchone()[0]
+    try:
+        cur.execute('INSERT INTO categories (name, display_order, user_id) VALUES (?, ?, ?)', (name, next_order, current_user.id))
+        conn.commit()
+    except Exception:
+        conn.close()
+        return jsonify({'error': 'category already exists'}), 409
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/categories/<string:name>', methods=['PATCH'])
+def api_rename_category(name):
+    from database import get_db_connection
+    new_name = (request.json or {}).get('name', '').strip()
+    if not new_name:
+        return jsonify({'error': 'name required'}), 400
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('UPDATE categories SET name = ? WHERE name = ? AND user_id = ?', (new_name, name, current_user.id))
+    cur.execute('UPDATE transactions SET category = ? WHERE category = ? AND user_id = ?', (new_name, name, current_user.id))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/categories/<string:name>', methods=['DELETE'])
+def api_delete_category(name):
+    from database import get_db_connection
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT COUNT(*) FROM transactions WHERE category = ? AND is_payment = 0 AND user_id = ?', (name, current_user.id))
+    count = cur.fetchone()[0]
+    if count > 0 and not request.args.get('confirm'):
+        conn.close()
+        return jsonify({'confirm_required': True, 'count': count}), 409
+    cur.execute('DELETE FROM categories WHERE name = ? AND user_id = ?', (name, current_user.id))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/categories/reorder', methods=['POST'])
+def api_reorder_categories():
+    from database import get_db_connection
+    ordered = (request.json or {}).get('order', [])
+    conn = get_db_connection()
+    cur = conn.cursor()
+    for i, name in enumerate(ordered):
+        cur.execute('UPDATE categories SET display_order = ? WHERE name = ? AND user_id = ?', (i, name, current_user.id))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
 @app.route('/api/people')
 def get_people():
     from database import get_db_connection
@@ -678,11 +876,12 @@ def get_people():
     # Pull unique names from both payers and shares
     cursor.execute('''
         SELECT DISTINCT name FROM (
-            SELECT person_name as name FROM transaction_shares
+            SELECT ts.person_name as name FROM transaction_shares ts
+            JOIN transactions t ON ts.transaction_id = t.id WHERE t.user_id = ?
             UNION
-            SELECT payer as name FROM transactions
+            SELECT payer as name FROM transactions WHERE user_id = ?
         ) WHERE name IS NOT NULL AND name != "" ORDER BY name
-    ''')
+    ''', (current_user.id, current_user.id))
     people = [row['name'] for row in cursor.fetchall()]
     conn.close()
     return jsonify(people)
@@ -694,7 +893,7 @@ def get_transaction_details(txn_id):
     cursor = conn.cursor()
     
     # 1. Get the main transaction data
-    cursor.execute('SELECT * FROM transactions WHERE id = ?', (txn_id,))
+    cursor.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ?', (txn_id, current_user.id))
     row = cursor.fetchone()
     if not row:
         conn.close()
@@ -728,9 +927,9 @@ def manage_tags():
         tag_name = data.get('tag_name', '').strip()
         if not tag_name: return jsonify({'error': 'Tag name required'}), 400
         
-        # Ensure tag exists
-        cursor.execute('INSERT OR IGNORE INTO tags (name) VALUES (?)', (tag_name,))
-        cursor.execute('SELECT id FROM tags WHERE name = ?', (tag_name,))
+        # Ensure tag exists for this user
+        cursor.execute('INSERT OR IGNORE INTO tags (name, user_id) VALUES (?, ?)', (tag_name, current_user.id))
+        cursor.execute('SELECT id FROM tags WHERE name = ? AND user_id = ?', (tag_name, current_user.id))
         tag_id = cursor.fetchone()[0]
         
         # Add tag to selected transactions
@@ -741,7 +940,7 @@ def manage_tags():
         conn.close()
         return jsonify({'success': True})
     
-    cursor.execute('SELECT * FROM tags ORDER BY name')
+    cursor.execute('SELECT * FROM tags WHERE user_id = ? ORDER BY name', (current_user.id,))
     tags = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify(tags)
@@ -754,7 +953,7 @@ def delete_tag(tag_id):
     try:
         cursor.execute('DELETE FROM transaction_tags WHERE tag_id = ?', (tag_id,))
         cursor.execute('DELETE FROM tag_defaults WHERE tag_id = ?', (tag_id,))
-        cursor.execute('DELETE FROM tags WHERE id = ?', (tag_id,))
+        cursor.execute('DELETE FROM tags WHERE id = ? AND user_id = ?', (tag_id, current_user.id))
         conn.commit()
         conn.close()
         return jsonify({'success': True})
@@ -773,15 +972,15 @@ def tag_defaults():
         data = request.json
         category = data.get('category')
         tag_ids = data.get('tag_ids', [])
-        cursor.execute('DELETE FROM tag_defaults WHERE category = ?', (category,))
+        cursor.execute('DELETE FROM tag_defaults WHERE category = ? AND user_id = ?', (category, current_user.id))
         for tid in tag_ids:
-            cursor.execute('INSERT INTO tag_defaults (category, tag_id) VALUES (?, ?)', (category, tid))
+            cursor.execute('INSERT INTO tag_defaults (category, tag_id, user_id) VALUES (?, ?, ?)', (category, tid, current_user.id))
         conn.commit()
         conn.close()
         return jsonify({'success': True})
     
     category = request.args.get('category')
-    cursor.execute('SELECT tag_id FROM tag_defaults WHERE category = ?', (category,))
+    cursor.execute('SELECT tag_id FROM tag_defaults WHERE category = ? AND user_id = ?', (category, current_user.id))
     defaults = [row[0] for row in cursor.fetchall()]
     conn.close()
     return jsonify(defaults)
@@ -796,8 +995,8 @@ def breakdown_views():
         data = request.json
         try:
             cur.execute('''
-                INSERT INTO breakdown_views (name, category, tag_ids, view_mode, time_range)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO breakdown_views (name, category, tag_ids, view_mode, time_range, user_id)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     category=excluded.category,
                     tag_ids=excluded.tag_ids,
@@ -808,6 +1007,7 @@ def breakdown_views():
                 data['tag_ids'],   # JSON string of id array
                 data.get('view_mode', 'net'),
                 data.get('time_range', '6m'),
+                current_user.id,
             ))
             conn.commit()
             conn.close()
@@ -816,7 +1016,7 @@ def breakdown_views():
             conn.close()
             return jsonify({'error': str(e)}), 500
 
-    cur.execute('SELECT * FROM breakdown_views ORDER BY name')
+    cur.execute('SELECT * FROM breakdown_views WHERE user_id = ? ORDER BY name', (current_user.id,))
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return jsonify(rows)
@@ -827,7 +1027,7 @@ def delete_breakdown_view(view_id):
     from database import get_db_connection
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('DELETE FROM breakdown_views WHERE id = ?', (view_id,))
+    cur.execute('DELETE FROM breakdown_views WHERE id = ? AND user_id = ?', (view_id, current_user.id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -880,10 +1080,10 @@ def breakdown_report():
         FROM transactions t
         WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({",".join(["?"]*len(tag_ids))}))
         AND COALESCE(t.applied_date, t.date) >= ? AND COALESCE(t.applied_date, t.date) < ?
-        AND t.category = ? AND t.is_payment = 0
+        AND t.category = ? AND t.is_payment = 0 AND t.user_id = ?
         ORDER BY t.date DESC
     '''
-    cursor.execute(table_sql, (*tag_ids, start_str, end_str, category))
+    cursor.execute(table_sql, (*tag_ids, start_str, end_str, category, current_user.id))
     rows = cursor.fetchall()
     table_data = []
     for r in rows:
@@ -914,9 +1114,9 @@ def breakdown_report():
             END) FROM transactions t
             WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({",".join(["?"]*len(tag_ids))}))
             AND strftime('%Y', COALESCE(t.applied_date, t.date)) = ? AND strftime('%m', COALESCE(t.applied_date, t.date)) = ?
-            AND t.category = ? AND t.is_payment = 0
+            AND t.category = ? AND t.is_payment = 0 AND t.user_id = ?
         '''
-        cursor.execute(sql, (*tag_ids, yr, mo, category))
+        cursor.execute(sql, (*tag_ids, yr, mo, category, current_user.id))
         month_total = cursor.fetchone()[0] or 0
         graph_data.append({'month': current_date.strftime('%b %Y'), 'total': month_total})
         current_date += relativedelta(months=1)
@@ -937,9 +1137,10 @@ def api_transactions():
                t.applied_date,
                (SELECT COUNT(*) FROM settlements s WHERE s.payment_id = t.id OR s.expense_id = t.id) as settlement_count
         FROM transactions t
+        WHERE t.user_id = ?
         ORDER BY date DESC
         LIMIT ?
-    ''', (limit,))
+    ''', (current_user.id, limit,))
     rows = cur.fetchall()
 
     txns = []
@@ -1012,14 +1213,15 @@ def plaid_exchange_token():
         cur = conn.cursor()
         cur.execute('''
             INSERT OR REPLACE INTO plaid_accounts
-                (item_id, access_token, institution_name, account_name, account_id)
-            VALUES (?, ?, ?, ?, ?)
+                (item_id, access_token, institution_name, account_name, account_id, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (
             result['item_id'],
             result['access_token'],
             data['institution_name'],
             data['account_name'],
             data['account_id'],
+            current_user.id,
         ))
         conn.commit()
         conn.close()
@@ -1034,7 +1236,7 @@ def plaid_accounts():
     from database import get_db_connection
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT id, institution_name, account_name, account_id, created_at FROM plaid_accounts')
+    cur.execute('SELECT id, institution_name, account_name, account_id, created_at FROM plaid_accounts WHERE user_id = ?', (current_user.id,))
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return jsonify(rows)
@@ -1046,11 +1248,11 @@ def plaid_modify_account(account_id):
     conn = get_db_connection()
     cur = conn.cursor()
     if request.method == 'DELETE':
-        cur.execute('DELETE FROM plaid_accounts WHERE id = ?', (account_id,))
+        cur.execute('DELETE FROM plaid_accounts WHERE id = ? AND user_id = ?', (account_id, current_user.id))
     else:  # PATCH — rename
         new_name = request.json.get('account_name', '').strip()
         if new_name:
-            cur.execute('UPDATE plaid_accounts SET account_name = ? WHERE id = ?', (new_name, account_id))
+            cur.execute('UPDATE plaid_accounts SET account_name = ? WHERE id = ? AND user_id = ?', (new_name, account_id, current_user.id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -1074,9 +1276,9 @@ def plaid_lookup_shared_profiles():
                    ts.person_name, ts.share_amount
             FROM transactions t
             JOIN transaction_shares ts ON ts.transaction_id = t.id
-            WHERE t.description = ? AND t.is_shared = 1 AND t.payer = 'Me'
+            WHERE t.description = ? AND t.is_shared = 1 AND t.payer = 'Me' AND t.user_id = ?
             ORDER BY t.date DESC
-        ''', (desc,))
+        ''', (desc, current_user.id))
         rows = cur.fetchall()
 
         if not rows:
@@ -1135,9 +1337,9 @@ def plaid_lookup_profiles():
             FROM transactions t
             LEFT JOIN transaction_tags tt ON tt.transaction_id = t.id
             LEFT JOIN tags tg ON tg.id = tt.tag_id
-            WHERE t.description = ? AND t.is_payment = 0
+            WHERE t.description = ? AND t.is_payment = 0 AND t.user_id = ?
             GROUP BY t.id
-        ''', (desc,))
+        ''', (desc, current_user.id))
         rows = cur.fetchall()
 
         if not rows:
@@ -1218,11 +1420,11 @@ def plaid_fetch_transactions():
         cur = conn.cursor()
 
         # Load all connected accounts
-        cur.execute('SELECT * FROM plaid_accounts')
+        cur.execute('SELECT * FROM plaid_accounts WHERE user_id = ?', (current_user.id,))
         accounts = [dict(r) for r in cur.fetchall()]
 
         # Load existing plaid IDs so we can deduplicate
-        cur.execute('SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id IS NOT NULL')
+        cur.execute('SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id IS NOT NULL AND user_id = ?', (current_user.id,))
         existing_ids = {r[0] for r in cur.fetchall()}
         conn.close()
 
@@ -1270,9 +1472,9 @@ def plaid_import_transactions():
                 cur.execute('''
                     SELECT id FROM transactions
                     WHERE date = ? AND description = ? AND amount = ? AND card_name = ?
-                    AND plaid_transaction_id IS NULL
+                    AND plaid_transaction_id IS NULL AND user_id = ?
                     LIMIT 1
-                ''', (t['date'], t['description'], t['amount'], t.get('card_name', '')))
+                ''', (t['date'], t['description'], t['amount'], t.get('card_name', ''), current_user.id))
                 existing = cur.fetchone()
 
                 if existing:
@@ -1283,14 +1485,15 @@ def plaid_import_transactions():
                     cur.execute('''
                         INSERT OR IGNORE INTO transactions
                             (date, description, merchant, amount, category, bank_category,
-                             card_name, is_payment, plaid_transaction_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             card_name, is_payment, plaid_transaction_id, user_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         t['date'], t['description'], t.get('merchant', ''),
                         t['amount'], category,
                         t.get('bank_category', ''), t.get('card_name', ''),
                         1 if t.get('is_payment') else 0,
                         plaid_id,
+                        current_user.id,
                     ))
                     if cur.rowcount > 0:
                         new_id = cur.lastrowid
@@ -1301,8 +1504,8 @@ def plaid_import_transactions():
                         # Adopt the new ID so this transaction stops resurfacing as a candidate.
                         cur.execute('''
                             UPDATE transactions SET plaid_transaction_id = ?
-                            WHERE date = ? AND description = ? AND amount = ? AND card_name = ?
-                        ''', (plaid_id, t['date'], t['description'], t['amount'], t.get('card_name', '')))
+                            WHERE date = ? AND description = ? AND amount = ? AND card_name = ? AND user_id = ?
+                        ''', (plaid_id, t['date'], t['description'], t['amount'], t.get('card_name', ''), current_user.id))
                         new_id = None
 
                 # Apply resolved tags if any
@@ -1325,7 +1528,7 @@ def plaid_import_transactions():
                 # Apply shared split if any
                 resolved_shares = t.get('resolved_shares')
                 if new_id and resolved_shares:
-                    cur.execute('UPDATE transactions SET is_shared = 1, payer = ? WHERE id = ?', ('Me', new_id))
+                    cur.execute('UPDATE transactions SET is_shared = 1, payer = ? WHERE id = ? AND user_id = ?', ('Me', new_id, current_user.id))
                     cur.execute('DELETE FROM transaction_shares WHERE transaction_id = ?', (new_id,))
                     total_reimbursement = 0
                     for share in resolved_shares:
@@ -1335,8 +1538,8 @@ def plaid_import_transactions():
                             'INSERT INTO transaction_shares (transaction_id, person_name, share_amount) VALUES (?, ?, ?)',
                             (new_id, share.get('person_name'), amt)
                         )
-                    cur.execute('UPDATE transactions SET reimbursement_amount = ? WHERE id = ?',
-                                (total_reimbursement, new_id))
+                    cur.execute('UPDATE transactions SET reimbursement_amount = ? WHERE id = ? AND user_id = ?',
+                                (total_reimbursement, new_id, current_user.id))
 
             except Exception:
                 pass

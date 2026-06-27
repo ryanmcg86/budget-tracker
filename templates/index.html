@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Budget Tracker</title>
+    <title>Spending Tracker</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>Budget Tracker</h1>
+        <header style="position:relative;">
+            <h1>Spending Tracker</h1>
             <nav class="tab-nav">
                 <button class="tab-btn active" onclick="openTab(event, 'overview')">Overview</button>
                 <!-- <button class="tab-btn" onclick="openTab(event, 'rules')">Rules</button> -->
@@ -18,7 +18,162 @@
                 <button class="tab-btn" onclick="openTab(event, 'shared')">Shared Expenses</button>
                 <button class="tab-btn" onclick="openTab(event, 'detailedBreakdowns')">Detailed Breakdowns</button>
             </nav>
+            <div style="position:absolute; top:0; right:0; display:flex; align-items:center; gap:6px;">
+                <span id="headerDisplayName" style="font-size:0.85em; color:var(--muted);"></span>
+                <button id="gearBtn" onclick="openSettingsModal()" title="Settings"
+                        style="background:none; border:none; color:var(--muted); font-size:1.4em;
+                               cursor:pointer; padding:4px 6px; border-radius:6px; line-height:1;
+                               transition:color 0.15s;">⚙</button>
+            </div>
         </header>
+
+        <!-- SETTINGS MODAL -->
+        <div id="settingsModal" style="display:none; position:fixed; z-index:200; left:0; top:0;
+                                       width:100%; height:100%; background:rgba(0,0,0,0.55);">
+            <div style="background:var(--card); margin:5% auto; padding:28px 32px; border-radius:12px;
+                        width:90%; max-width:520px; max-height:85vh; overflow-y:auto;
+                        border:1px solid var(--border); position:relative;">
+
+                <!-- Header -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <h3 style="margin:0; color:var(--ink);">Settings</h3>
+                    <button onclick="closeSettingsModal()"
+                            style="background:none; border:none; color:var(--muted); font-size:1.4em;
+                                   cursor:pointer; line-height:1; padding:0;">&times;</button>
+                </div>
+
+                <!-- Section tabs -->
+                <div style="display:flex; gap:3px; background:var(--canvas); border:1px solid var(--border);
+                            border-radius:8px; padding:3px; margin-bottom:24px;">
+                    <button id="stAccount" onclick="switchSettingsTab('account')"
+                            style="flex:1; padding:7px; border:none; border-radius:6px; cursor:pointer;
+                                   font-size:0.9em; font-weight:600; background:var(--surface-2); color:var(--ink);">Account</button>
+                    <button id="stCategories" onclick="switchSettingsTab('categories')"
+                            style="flex:1; padding:7px; border:none; border-radius:6px; cursor:pointer;
+                                   font-size:0.9em; font-weight:600; background:none; color:var(--muted);">Categories</button>
+                </div>
+
+                <!-- ── ACCOUNT PANEL ── -->
+                <div id="settingsPanelAccount">
+
+                    <!-- Profile -->
+                    <h4 style="margin:0 0 14px; color:var(--ink);">Profile</h4>
+                    <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:6px;">
+                        <div>
+                            <label style="display:block; font-size:0.8em; color:var(--muted); margin-bottom:4px;">Display name</label>
+                            <input id="acctDisplayName" type="text" placeholder="e.g. Ryan"
+                                   style="width:100%; box-sizing:border-box; padding:8px 10px; border-radius:6px;
+                                          border:1px solid var(--border); background:var(--field); color:var(--ink); font-size:0.9em;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size:0.8em; color:var(--muted); margin-bottom:4px;">Email</label>
+                            <input id="acctEmail" type="email"
+                                   style="width:100%; box-sizing:border-box; padding:8px 10px; border-radius:6px;
+                                          border:1px solid var(--border); background:var(--field); color:var(--ink); font-size:0.9em;">
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:24px;">
+                        <button onclick="saveProfile()"
+                                style="padding:8px 18px; background:var(--accent); color:#fff; border:none;
+                                       border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600;">Save</button>
+                        <span id="profileMsg" style="font-size:0.85em; color:var(--muted);"></span>
+                    </div>
+
+                    <div style="border-top:1px solid var(--border); margin-bottom:24px;"></div>
+
+                    <!-- Password -->
+                    <h4 style="margin:0 0 14px; color:var(--ink);">Change Password</h4>
+                    <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:6px;">
+                        <div>
+                            <label style="display:block; font-size:0.8em; color:var(--muted); margin-bottom:4px;">Current password</label>
+                            <input id="acctCurrentPw" type="password"
+                                   style="width:100%; box-sizing:border-box; padding:8px 10px; border-radius:6px;
+                                          border:1px solid var(--border); background:var(--field); color:var(--ink); font-size:0.9em;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size:0.8em; color:var(--muted); margin-bottom:4px;">New password</label>
+                            <input id="acctNewPw" type="password"
+                                   style="width:100%; box-sizing:border-box; padding:8px 10px; border-radius:6px;
+                                          border:1px solid var(--border); background:var(--field); color:var(--ink); font-size:0.9em;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size:0.8em; color:var(--muted); margin-bottom:4px;">Confirm new password</label>
+                            <input id="acctConfirmPw" type="password"
+                                   style="width:100%; box-sizing:border-box; padding:8px 10px; border-radius:6px;
+                                          border:1px solid var(--border); background:var(--field); color:var(--ink); font-size:0.9em;">
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:24px;">
+                        <button onclick="changePassword()"
+                                style="padding:8px 18px; background:var(--accent); color:#fff; border:none;
+                                       border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600;">Update Password</button>
+                        <span id="passwordMsg" style="font-size:0.85em; color:var(--muted);"></span>
+                    </div>
+
+                    <div style="border-top:1px solid var(--border); margin-bottom:24px;"></div>
+
+                    <!-- Export -->
+                    <h4 style="margin:0 0 6px; color:var(--ink);">Export Data</h4>
+                    <p style="color:var(--muted); font-size:0.875em; margin:0 0 12px;">
+                        Download all your transactions as a CSV file.
+                    </p>
+                    <button onclick="exportData()"
+                            style="padding:8px 18px; background:var(--move); color:#fff; border:none;
+                                   border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600; margin-bottom:24px;">Download CSV</button>
+
+                    <div style="border-top:1px solid var(--border); margin-bottom:20px;"></div>
+
+                    <!-- Log out -->
+                    <h4 style="margin:0 0 6px; color:var(--ink);">Session</h4>
+                    <p style="color:var(--muted); font-size:0.875em; margin:0 0 12px;">
+                        Sign out of your account on this device.
+                    </p>
+                    <a href="/logout"
+                       style="display:inline-block; padding:8px 18px; background:var(--surface-2);
+                              color:var(--ink); border:1px solid var(--border); border-radius:6px;
+                              cursor:pointer; font-size:0.9em; font-weight:600; text-decoration:none;
+                              margin-bottom:24px;">Log Out</a>
+
+                    <div style="border-top:1px solid rgba(232,123,97,0.4); margin-bottom:20px;"></div>
+
+                    <!-- Danger zone -->
+                    <h4 style="margin:0 0 6px; color:var(--neg);">Close Account</h4>
+                    <p style="color:var(--muted); font-size:0.875em; margin:0 0 12px;">
+                        This permanently deletes your account and all associated data. This cannot be undone.
+                        Type your email address to confirm.
+                    </p>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input id="acctDeleteConfirm" type="email" placeholder="your@email.com"
+                               style="flex:1; padding:8px 10px; border-radius:6px;
+                                      border:1px solid var(--neg); background:var(--field); color:var(--ink); font-size:0.9em;">
+                        <button onclick="closeAccount()"
+                                style="padding:8px 16px; background:var(--neg); color:#fff; border:none;
+                                       border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600; white-space:nowrap;">Delete Everything</button>
+                    </div>
+                    <span id="deleteMsg" style="font-size:0.85em; color:var(--neg); display:block; margin-top:8px;"></span>
+                </div>
+
+                <!-- ── CATEGORIES PANEL ── -->
+                <div id="settingsPanelCategories" style="display:none;">
+                    <h4 style="margin:0 0 6px; color:var(--ink);">Spending Categories</h4>
+                    <p style="color:var(--muted); font-size:0.875em; margin:0 0 16px;">
+                        Renaming a category updates all existing transactions automatically.
+                    </p>
+                    <ul id="categoryList" style="list-style:none; padding:0; margin:0 0 16px;"></ul>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input id="newCategoryInput" type="text" placeholder="New category name"
+                               style="flex:1; padding:8px 10px; border-radius:6px;
+                                      border:1px solid var(--border); background:var(--field);
+                                      color:var(--ink); font-size:0.9em;"
+                               onkeydown="if(event.key==='Enter') addCategory()">
+                        <button onclick="addCategory()"
+                                style="padding:8px 16px; background:var(--accent); color:#fff; border:none;
+                                       border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600;">Add</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
 
         <!-- OVERVIEW TAB -->
         <div id="overview" class="tab-content active">
@@ -397,38 +552,8 @@
         <!-- IMPORT TAB -->
         <div id="upload" class="tab-content">
 
-            <!-- ── CSV Upload (existing) ─────────────────────────────── -->
-            <section class="upload-section" style="margin-bottom: 40px; padding-bottom: 30px; border-bottom: 2px solid #f0f0f0;">
-                <h2>Upload CSV Statement</h2>
-                <form id="uploadForm" enctype="multipart/form-data">
-            
-                    <div class="bank-selection-wrapper" style="margin-bottom: 25px; padding: 15px; background: #eee; border-radius: 8px;">
-                        <label for="bankSelect" style="display: block; margin-bottom: 8px; font-weight: 600;">Select Bank Account:</label>
-                        <select id="bankSelect" onchange="toggleCustomBank()" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
-                            <option value="Chase">Chase</option>
-                            <option value="Capital One">Capital One</option>
-                            <option value="Venmo">Venmo</option>
-                            <option value="Other">Other...</option>
-                        </select>
-                        <div id="customBankWrapper" style="display: none; margin-top: 15px;">
-                            <label for="customBankName" style="display: block; margin-bottom: 5px; font-size: 0.9em;">Enter Custom Bank Name:</label>
-                            <input type="text" id="customBankName" placeholder="e.g., Apple Card" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
-                        </div>
-                    </div>
-
-                    <div class="file-input-wrapper">
-                        <input type="file" id="csvFile" name="file" accept=".csv" required>
-                        <label for="csvFile" class="file-label">Choose CSV File</label>
-                        <span id="fileName" class="file-name">No file chosen</span>
-                    </div>
-            
-                    <button type="submit" class="btn-primary" style="margin-top: 20px;">Upload & Process</button>
-                </form>
-                <div id="uploadStatus" class="status-message"></div>
-            </section>
-
             <!-- ── Bank Sync (Plaid) ──────────────────────────────────── -->
-            <section class="upload-section">
+            <section class="upload-section" style="margin-bottom: 40px; padding-bottom: 30px; border-bottom: 2px solid #f0f0f0;">
                 <h2>Bank Sync</h2>
 
                 <!-- Connected accounts list -->
@@ -507,6 +632,36 @@
                 </div>
 
                 <div id="plaidStatusMessage" style="margin-top: 15px; font-style: italic; color: #666;"></div>
+            </section>
+
+            <!-- ── CSV Upload ─────────────────────────────────────────── -->
+            <section class="upload-section">
+                <h2>Upload CSV Statement</h2>
+                <form id="uploadForm" enctype="multipart/form-data">
+
+                    <div class="bank-selection-wrapper" style="margin-bottom: 25px; padding: 15px; background: #eee; border-radius: 8px;">
+                        <label for="bankSelect" style="display: block; margin-bottom: 8px; font-weight: 600;">Select Bank Account:</label>
+                        <select id="bankSelect" onchange="toggleCustomBank()" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
+                            <option value="Chase">Chase</option>
+                            <option value="Capital One">Capital One</option>
+                            <option value="Venmo">Venmo</option>
+                            <option value="Other">Other...</option>
+                        </select>
+                        <div id="customBankWrapper" style="display: none; margin-top: 15px;">
+                            <label for="customBankName" style="display: block; margin-bottom: 5px; font-size: 0.9em;">Enter Custom Bank Name:</label>
+                            <input type="text" id="customBankName" placeholder="e.g., Apple Card" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
+                        </div>
+                    </div>
+
+                    <div class="file-input-wrapper">
+                        <input type="file" id="csvFile" name="file" accept=".csv" required>
+                        <label for="csvFile" class="file-label">Choose CSV File</label>
+                        <span id="fileName" class="file-name">No file chosen</span>
+                    </div>
+
+                    <button type="submit" class="btn-primary" style="margin-top: 20px;">Upload & Process</button>
+                </form>
+                <div id="uploadStatus" class="status-message"></div>
             </section>
         </div>
 
@@ -735,6 +890,7 @@
                 </div>
             </form>
         </div>
+
     </div>
 </body>
 </html>
