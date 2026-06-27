@@ -224,7 +224,8 @@ async function loadSummary() {
 }
 
 let overviewChartRange = '6m'; // Default chart range for the Monthly Spending Trend graph
-let overviewSlide = 0; // 0 = bar chart, 1 = Sankey
+let overviewSlide = 0;    // 0 = bar chart, 1 = Sankey
+let sankeyAvgMode = false; // false = Total, true = Avg/mo
 
 function setOverviewSlide(index) {
     overviewSlide = index;
@@ -245,8 +246,24 @@ function setOverviewSlide(index) {
         dot.style.background = dot.dataset.slide === String(index) ? '#764ba2' : '#ccc';
     });
 
+    updateSankeyToggleVisibility();
+
     if (index === 0) loadOverviewHistoryChart();
     else             loadSankeyChart();
+}
+
+function updateSankeyToggleVisibility() {
+    const toggle = document.getElementById('sankeyAvgToggle');
+    if (!toggle) return;
+    const show = overviewSlide === 1 && overviewChartRange !== '1m';
+    toggle.style.display = show ? 'flex' : 'none';
+}
+
+function setSankeyAvgMode(avg) {
+    sankeyAvgMode = avg;
+    document.getElementById('btnSankeyTotal').classList.toggle('active', !avg);
+    document.getElementById('btnSankeyAvg').classList.toggle('active', avg);
+    loadSankeyChart();
 }
 
 function setOverviewChartRange(event, range) {
@@ -255,6 +272,7 @@ function setOverviewChartRange(event, range) {
     const container = event.currentTarget.closest('.chart-time-controls');
     container.querySelectorAll('.time-btn').forEach(btn => btn.classList.remove('active'));
     event.currentTarget.classList.add('active');
+    updateSankeyToggleVisibility();
     loadCurrentOverviewChart();
 }
 
@@ -272,7 +290,9 @@ async function loadSankeyChart() {
     const res  = await fetch(`/api/sankey-data?${params.toString()}`);
     const data = await res.json();
 
-    const { income, categories } = data;
+    const divisor = sankeyAvgMode ? (data.months_in_range || 1) : 1;
+    const income     = data.income / divisor;
+    const categories = data.categories.map(c => ({ ...c, total: c.total / divisor }));
     const totalExpenses = categories.reduce((s, c) => s + c.total, 0);
     const savings = income - totalExpenses;
 
@@ -418,6 +438,31 @@ async function loadOverviewHistoryChart() {
             showlegend: false
         };
 
+        // Dashed reference line — avg for multi-month, total for single month.
+        // Uses layout.shapes so it renders correctly even with only one x-point.
+        const chartAvg = monthTotals.length
+            ? monthTotals.reduce((s, v) => s + v, 0) / monthTotals.length
+            : null;
+        const avgShape = chartAvg != null ? [{
+            type: 'line',
+            xref: 'paper', yref: 'y',
+            x0: 0, x1: 1,
+            y0: chartAvg, y1: chartAvg,
+            line: { color: '#8E949E', width: 1.5, dash: 'dash' }
+        }] : [];
+        const avgAnnotation = chartAvg != null ? [{
+            xref: 'paper', yref: 'y',
+            x: 1, y: chartAvg,
+            xanchor: 'right', yanchor: 'bottom',
+            text: singleMonth
+                ? `total $${Math.round(chartAvg).toLocaleString('en-US')}`
+                : `avg $${Math.round(chartAvg).toLocaleString('en-US')}/mo`,
+            showarrow: false,
+            font: { color: '#8E949E', size: 11, family: 'Schibsted Grotesk, sans-serif' },
+            bgcolor: 'rgba(53,58,66,0.85)',
+            borderpad: 3
+        }] : [];
+
         const chartData = singleMonth ? visibleTraces : [...visibleTraces, totalTrace];
 
         const layout = {
@@ -442,7 +487,9 @@ async function loadOverviewHistoryChart() {
                 font: { color: '#F3F4F5', family: 'Schibsted Grotesk, sans-serif', size: 13 }
             },
             showlegend: true,
-            legend: { orientation: 'h', x: 0, y: -0.3, font: { color: '#C9CDD3' } }
+            legend: { orientation: 'h', x: 0, y: -0.3, font: { color: '#C9CDD3' } },
+            shapes: avgShape,
+            annotations: avgAnnotation
         };
 
         Plotly.newPlot('overviewHistoryChart', chartData, layout, { responsive: true, displayModeBar: false });

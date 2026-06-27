@@ -327,11 +327,22 @@ def sankey_data():
     if uncategorized > 0.01:
         categories.append({'name': 'Uncategorized', 'total': uncategorized})
 
+    # Count distinct months that actually have data in the queried window.
+    # Used by the frontend to compute per-month averages accurately
+    # (e.g. "5Y" with only 6 months of real data averages over 6, not 60).
+    cur.execute('''
+        SELECT COUNT(DISTINCT strftime('%Y-%m', COALESCE(applied_date, date)))
+        FROM transactions
+        WHERE COALESCE(applied_date, date) >= ? AND COALESCE(applied_date, date) <= ?
+    ''', (start_str, end_str))
+    months_in_range = max(1, cur.fetchone()[0])
+
     conn.close()
 
     return jsonify({
         'income': round(income, 2),
         'categories': categories,
+        'months_in_range': months_in_range,
     })
 
 

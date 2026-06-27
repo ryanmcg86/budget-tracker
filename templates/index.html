@@ -71,6 +71,10 @@
                     <span class="slide-dot" data-slide="1" onclick="setOverviewSlide(1)"
                           style="width:8px; height:8px; border-radius:50%; background:#ccc; cursor:pointer; display:inline-block;"></span>
                 </div>
+                <div id="sankeyAvgToggle" style="display:none; justify-content:center; gap:6px; margin-top:8px;">
+                    <button id="btnSankeyTotal" class="toggle-btn active" onclick="setSankeyAvgMode(false)">Total</button>
+                    <button id="btnSankeyAvg"   class="toggle-btn"        onclick="setSankeyAvgMode(true)">Avg / mo</button>
+                </div>
             </div>
 
             <!-- Row 1: Monthly -->
