@@ -2,6 +2,8 @@
 
 A personal finance web app built with Flask and SQLite. Transactions can be imported via CSV upload or fetched live from connected bank accounts through the Plaid API. The app tracks spending by category, handles shared expenses and bill splitting across multiple people, and provides detailed breakdowns with tagging and saved views.
 
+Access is invite-only — there is no public registration. Each user's data is fully isolated; every query is scoped to `current_user.id`.
+
 ---
 
 ## Project Structure
@@ -9,11 +11,14 @@ A personal finance web app built with Flask and SQLite. Transactions can be impo
 ```
 spending-tracker/
 ├── app.py                  # Flask application — all API routes
+├── auth.py                 # Flask-Login setup, User model, login/logout routes
+├── create_user.py          # CLI script to create new invite-only user accounts
 ├── database.py             # Database schema, migrations, and query helpers
 ├── plaid_integration.py    # Plaid API client (link tokens, token exchange, transaction fetch)
 ├── static/js/main.js       # All frontend logic (vanilla JS + Plotly)
 ├── static/css/style.css    # Dark-theme stylesheet
-├── templates/index.html    # Single-page HTML shell
+├── templates/index.html    # Single-page HTML shell (authenticated)
+├── templates/login.html    # Login page
 └── budget.db               # SQLite database (auto-created on first run)
 ```
 
@@ -22,29 +27,72 @@ spending-tracker/
 ## Scripts
 
 <details>
+<summary><strong>auth.py</strong></summary>
+
+Owns the authentication layer. Imported by `app.py` at startup.
+
+### Classes
+
+**`User(UserMixin)`**
+Flask-Login user model. Holds `id` and `email`. `User.get(user_id)` loads by primary key; `User.get_by_email(email)` returns the full row including `password_hash` for login verification.
+
+### Routes
+
+**`GET|POST /login`**
+Renders the login form (GET) or validates credentials and creates a session (POST). Passwords are verified with bcrypt. Sessions persist across browser restarts (`remember=True`).
+
+**`GET /logout`**
+Clears the session and redirects to `/login`.
+
+</details>
+
+---
+
+<details>
+<summary><strong>create_user.py</strong></summary>
+
+Invite-only user creation CLI. Run directly on the server — there is no self-registration flow.
+
+```bash
+python create_user.py
+```
+
+Prompts for email and password (with confirmation), hashes the password with bcrypt, and inserts a row into the `users` table. Enforces a minimum password length of 8 characters.
+
+</details>
+
+---
+
+<details>
 <summary><strong>database.py</strong></summary>
 
 Owns the database layer. All other files import from here rather than opening `budget.db` directly.
 
 ### Constants
 
+**`DEFAULT_CATEGORIES`**
+The seed list of ten spending categories used to populate the `categories` table on first run. The live source of truth is the `categories` table; call `get_categories(user_id)` to get the current ordered list.
+
 **`TRACKED_CATEGORIES`**
-The canonical list of ten spending categories used throughout the app (Streaming, Transportation, Food/Drink, Travel, Utilities, Party, Wellness, Entertainment, Investing, Miscellaneous/Infrequent). Injected into `index.html` at render time so the frontend and backend always share the same list. Adding or removing a category here must be mirrored on the frontend.
+Legacy alias for `DEFAULT_CATEGORIES`. Kept so older imports don't break during migration. Do not use in new code.
 
 ### Database Schema
 
 | Table | Purpose |
 |---|---|
+| `users` | Registered accounts (email, bcrypt password hash, display name) |
 | `transactions` | Core transaction ledger |
 | `payment_splits` | Sub-rows that divide a lump payment across multiple applied dates |
 | `transaction_shares` | Per-person share amounts for a shared transaction |
 | `settlements` | Records when a shared-expense payment is matched against an expense (legacy) |
-| `categories` | Category name registry (informational) |
-| `tags` | Tag name registry |
+| `categories` | Per-user ordered category name registry |
+| `tags` | Per-user tag name registry |
 | `transaction_tags` | Many-to-many link between transactions and tags |
 | `tag_defaults` | Default tags to apply per category on the Detailed Breakdowns page |
 | `plaid_accounts` | Connected bank accounts (stores Plaid access tokens) |
 | `breakdown_views` | Saved tag+category combinations for the Detailed Breakdowns page |
+
+**User isolation:** all tables except `users` and `transaction_tags` carry a `user_id` column. All queries filter by `user_id`; `init_db()` backfills existing rows to `user_id = 1` on startup.
 
 **Key `transactions` columns:**
 - `amount` — expenses stored as positive; payments/credits stored with original sign
@@ -62,10 +110,13 @@ The canonical list of ten spending categories used throughout the app (Streaming
 Opens and returns a connection to `budget.db` with `row_factory = sqlite3.Row` so query results are accessible by column name.
 
 **`init_db()`**
-Called once at app startup. Creates all tables if they don't exist and runs all incremental column migrations (via try/except `ALTER TABLE`) for databases created by older versions. Also runs orphan-settlement cleanup on every startup. Calls `clean_account_names()` at the end.
+Called once at app startup. Creates all tables if they don't exist, runs all incremental column migrations (via try/except `ALTER TABLE`), adds `user_id` to all user-scoped tables and backfills existing rows to `user_id = 1`, runs orphan-settlement cleanup, and calls `clean_account_names()`.
 
-**`insert_transactions(transactions)`**
-Bulk-inserts a list of transaction tuples from CSV or Plaid processing. Uses `INSERT OR IGNORE` to silently skip duplicate rows (same date/description/amount/card_name). Returns the number of rows actually inserted.
+**`get_categories(user_id=1)`**
+Returns the ordered list of category names for the given user from the `categories` table. This is the live source of truth — use it instead of `TRACKED_CATEGORIES`.
+
+**`insert_transactions(transactions, user_id=1)`**
+Bulk-inserts a list of transaction tuples from CSV or Plaid processing. Uses `INSERT OR IGNORE` to silently skip duplicate rows (same date/description/amount/card_name). Stamps each row with the given `user_id`. Returns the number of rows actually inserted.
 
 **`get_monthly_summary()`**
 Returns total spend and transaction count grouped by month. Mostly superseded by `get_detailed_breakdown`.
@@ -79,15 +130,15 @@ Returns the most recent N transactions. Superseded in the API layer by the inlin
 **`get_detailed_summary(year, month)`**
 Returns year-to-date and single-month category totals. Legacy helper; the active route uses `get_detailed_breakdown` instead.
 
-**`get_detailed_breakdown(year, month)`**
-The primary data source for the Overview tab tables. Returns three maps — `month_totals`, `year_totals`, and `year_averages` — each keyed by category with both `gross` and `net` values.
+**`get_detailed_breakdown(year, month, user_id=1)`**
+The primary data source for the Overview tab tables. Returns three maps — `month_totals`, `year_totals`, and `year_averages` — each keyed by category with both `gross` and `net` values. All queries are scoped to `user_id`.
 
 - **Gross** — cash you physically paid out: `CASE WHEN payer='Me' THEN amount ELSE 0 END`. Expenses where someone else paid are excluded because that cash hasn't left your account yet.
 - **Net** — your true economic obligation: `CASE WHEN payer='Me' THEN (amount - reimbursement_amount) ELSE reimbursement_amount END`. Includes your share of expenses others paid, excludes the portions others owe you.
 - All date comparisons use `COALESCE(applied_date, date)` so date-overridden transactions land in the correct bucket.
 
-**`get_overview_history(year, month, view_mode, time_range)`**
-Powers the stacked bar chart. Returns a list of month labels and per-category totals for the requested range (1m/3m/6m/1y/5y) ending at the given month. Applies the same gross/net formula as `get_detailed_breakdown`.
+**`get_overview_history(year, month, view_mode, time_range, user_id=1)`**
+Powers the stacked bar chart. Returns a list of month labels and per-category totals for the requested range (1m/3m/6m/1y/5y) ending at the given month. Calls `get_categories(user_id)` and scopes all queries to `user_id`. Applies the same gross/net formula as `get_detailed_breakdown`.
 
 **`clean_account_names()`**
 Normalises `card_name` values from CSV imports (e.g. collapses various Chase name strings to `"Chase"`). Run automatically at startup.
@@ -128,12 +179,12 @@ Maps a raw Plaid transaction object to the app's internal dict format. Prefers t
 <details>
 <summary><strong>app.py</strong></summary>
 
-The Flask application. Every URL the frontend calls is defined here. Helper functions that don't serve a route live at the top of the Plaid section.
+The Flask application. Every URL the frontend calls is defined here. All routes require authentication via a `before_request` guard; unauthenticated requests redirect to `/login`. Helper functions that don't serve a route live at the top of the Plaid section.
 
 ### Helper Functions
 
-**`process_csv(df, card_name)`**
-Parses a pandas DataFrame from a CSV upload. Auto-detects date, description, amount, and category columns by name. Normalises amounts (expenses stored positive, payments with original sign), detects payments/credits from keywords and category values, deduplicates rows that appear more than once in the same file (appending ` (2)`, ` (3)` etc.), and calls `insert_transactions`. Returns the number of rows inserted.
+**`process_csv(df, card_name, user_id)`**
+Parses a pandas DataFrame from a CSV upload. Auto-detects date, description, amount, and category columns by name. Normalises amounts (expenses stored positive, payments with original sign), detects payments/credits from keywords and category values, deduplicates rows that appear more than once in the same file (appending ` (2)`, ` (3)` etc.), and calls `insert_transactions(final_data, user_id)`. Returns the number of rows inserted.
 
 **`_filter_internal_transfers(candidates)`**
 Splits a Plaid candidate list into `(kept, removed)` based on known internal transfer pairs defined in `TRANSFER_PAIRS` — currently: Venmo "Standard transfer" ↔ Capital One "Venmo", and Capital One "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile". Pairs are matched on equal-and-opposite amounts within a 5-day window. Returns a tuple so the frontend can show both lists.
@@ -143,33 +194,50 @@ Splits a Plaid candidate list into `(kept, removed)` based on known internal tra
 #### Core
 
 **`GET /`**
-Renders `index.html`, injecting `TRACKED_CATEGORIES` as a JSON data island.
+Renders `index.html`, injecting the current user's ordered category list as a JSON data island.
 
 **`POST /upload`**
-Accepts a CSV file and a `bank_name` form field. Delegates to `process_csv` and returns the number of rows inserted.
+Accepts a CSV file and a `bank_name` form field. Delegates to `process_csv` (passing `current_user.id`) and returns the number of rows inserted.
+
+#### Account Management
+
+**`GET /api/account`**
+Returns the current user's `email` and `display_name`.
+
+**`PATCH /api/account/profile`**
+Updates `display_name` and `email` for the current user. Returns 409 if the email is already taken.
+
+**`PATCH /api/account/password`**
+Verifies the current password and updates it to a new bcrypt hash. Enforces minimum 8-character length.
+
+**`GET /api/account/export`**
+Streams the current user's transactions as a CSV download.
+
+**`DELETE /api/account`**
+Permanently deletes the current user's account and all associated data (transactions, categories, tags, plaid accounts, etc.). Requires the user to type their email to confirm.
 
 #### Transactions
 
 **`GET /api/transactions`**
-Returns up to N transactions (default 100, configurable via `?limit=`) ordered newest-first, with each transaction's tags as a nested list. Includes `applied_date` in the response.
+Returns up to N transactions (default 100, configurable via `?limit=`) for the current user, ordered newest-first, with each transaction's tags as a nested list. Includes `applied_date` in the response.
 
 **`GET /api/transaction/<id>/details`**
-Returns a single transaction by ID, including its `shares` list (from `transaction_shares`), `payment_splits` list, and settlement count. Used to pre-populate the Edit modal.
+Returns a single transaction by ID (scoped to current user), including its `shares` list (from `transaction_shares`), `payment_splits` list, and settlement count. Used to pre-populate the Edit modal.
 
 **`POST /api/transaction/manual`**
-Inserts a manually entered transaction. Accepts `is_payment`, `is_shared`, `payer`, and a `shares` list.
+Inserts a manually entered transaction for the current user. Accepts `is_payment`, `is_shared`, `payer`, and a `shares` list.
 
 **`DELETE /api/transaction/<id>`**
-Deletes a transaction and cascades to remove associated `transaction_shares` and `settlements` rows.
+Deletes a transaction (scoped to current user) and cascades to remove associated `transaction_shares` and `settlements` rows.
 
 **`POST /api/transaction/<id>/toggle-shared`**
-Flips the `is_shared` boolean on a single transaction.
+Flips the `is_shared` boolean on a single transaction (scoped to current user).
 
 **`POST /api/transaction/<id>/toggle-payment`**
-Flips the `is_payment` boolean, moving a transaction between the Expenses and Payments tables.
+Flips the `is_payment` boolean, moving a transaction between the Expenses and Payments tables (scoped to current user).
 
 **`POST /api/transaction/bulk-edit`**
-Updates one or more fields for a list of transaction IDs in one call. Accepted fields:
+Updates one or more fields for a list of transaction IDs in one call (all scoped to current user). Accepted fields:
 - `description` — updates description and merchant
 - `category` — sets category and marks it as manually assigned
 - `applied_date` — sets or clears the date override (key presence triggers update; `null` clears it)
@@ -182,13 +250,13 @@ Updates one or more fields for a list of transaction IDs in one call. Accepted f
 Returns the raw monthly summary from `get_monthly_summary()`.
 
 **`GET /api/detailed-summary`**
-Returns month totals, year totals, and year averages for the Overview tab from `get_detailed_breakdown`. Accepts `?year=` and `?month=`.
+Returns month totals, year totals, and year averages for the Overview tab from `get_detailed_breakdown(year, month, current_user.id)`. Accepts `?year=` and `?month=`.
 
 **`GET /api/overview-history`**
-Returns stacked bar chart data. Accepts `?year=`, `?month=`, `?view_mode=` (gross/net), and `?time_range=` (1m/3m/6m/1y/5y). Applies the same gross/net formula as `get_detailed_breakdown`.
+Returns stacked bar chart data. Accepts `?year=`, `?month=`, `?view_mode=` (gross/net), and `?time_range=` (1m/3m/6m/1y/5y). Calls `get_overview_history` with `current_user.id`.
 
 **`GET /api/sankey-data`**
-Returns income and per-category expense totals for the Sankey (Income Flow) diagram. Accepts `?year=`, `?month=`, `?view_mode=`, and `?time_range=`.
+Returns income and per-category expense totals for the Sankey (Income Flow) diagram for the current user. Accepts `?year=`, `?month=`, `?view_mode=`, and `?time_range=`.
 
 Income calculation:
 - Unsplit payments: `COALESCE(applied_date, date)` used for date bucketing; gross includes shared payments, net excludes them (`AND is_shared = 0`)
@@ -200,21 +268,27 @@ Expense calculation uses the same gross/net formula as `get_detailed_breakdown`:
 
 This means gross/net savings differ by exactly the net shared balance still outstanding: `gross_savings − net_savings = shared_income_received − net_fronted_for_others`.
 
-#### Categories & Rules
+#### Categories
 
 **`GET /api/categories`**
-Returns total spend grouped by category.
+Returns the current user's ordered list of category names.
 
-**`GET|POST /api/rules`**
-Lists all category rules (GET) or creates a new one and immediately re-applies all rules to existing transactions (POST).
+**`POST /api/categories`**
+Adds a new category for the current user. Body: `{ name }`. Returns 409 if the name already exists.
 
-**`DELETE /api/rules/<id>`**
-Deletes a single category rule.
+**`PATCH /api/categories/<name>`**
+Renames a category and auto-migrates all of the user's transactions with that category to the new name.
+
+**`DELETE /api/categories/<name>`**
+Deletes a category. Returns 409 with `{ confirm_required, count }` if transactions exist; pass `?confirm=1` to force delete.
+
+**`POST /api/categories/reorder`**
+Saves a new display order. Body: `{ order: [name, name, ...] }`.
 
 #### Shared Expenses & Ledger
 
 **`GET /api/shared-ledger`**
-Returns the full shared-expense ledger. Query params: `?person=` (filter to one person), `?year=`, `?month=`.
+Returns the full shared-expense ledger for the current user. Query params: `?person=` (filter to one person), `?year=`, `?month=`.
 
 Logic:
 1. Fetches all shared transactions where you are the payer or a share recipient
@@ -229,32 +303,32 @@ Also returns all known people grouped into `owes_me`, `i_owe`, and `settled` for
 Balance sign convention: positive = others owe you; negative = you owe others.
 
 **`GET /api/people`**
-Returns a deduplicated list of all person names that appear as payers or share recipients.
+Returns a deduplicated list of all person names that appear as payers or share recipients for the current user.
 
 #### Tags
 
 **`GET|POST /api/tags`**
-Lists all tags (GET) or attaches one or more tag names to a list of transaction IDs (POST), creating new tags as needed.
+Lists all tags for the current user (GET) or attaches one or more tag names to a list of transaction IDs (POST), creating new tags as needed.
 
 **`DELETE /api/tag/<id>`**
-Globally deletes a tag and removes it from all transactions and tag defaults.
+Globally deletes a tag (scoped to current user) and removes it from all transactions and tag defaults.
 
 **`DELETE /api/transaction/<id>/tag/<tag_id>`**
 Removes a single tag from a single transaction without affecting the tag globally.
 
 **`GET|POST /api/tag-defaults`**
-Gets or sets the default tags for a given category on the Detailed Breakdowns page.
+Gets or sets the default tags for a given category for the current user.
 
 #### Detailed Breakdowns
 
 **`GET /api/breakdown-report`**
-Returns chart data (monthly totals) and table data (individual transactions) for the selected category, tags, year/month, view mode, and time range. Table covers the full time range shown on the graph, not just the selected month.
+Returns chart data (monthly totals) and table data (individual transactions) for the selected category, tags, year/month, view mode, and time range. Scoped to current user. Table covers the full time range shown on the graph, not just the selected month.
 
 **`GET|POST /api/breakdown-views`**
-Lists all saved breakdown views (GET) or creates/updates one by name (POST). Each view stores a name, category, tag ID list, view mode, and time range.
+Lists all saved breakdown views for the current user (GET) or creates/updates one by name (POST). Each view stores a name, category, tag ID list, view mode, and time range.
 
 **`DELETE /api/breakdown-views/<id>`**
-Deletes a saved breakdown view.
+Deletes a saved breakdown view (scoped to current user).
 
 #### Plaid Integration
 
@@ -262,25 +336,25 @@ Deletes a saved breakdown view.
 Returns a Plaid Link token so the frontend can open the bank-connection popup.
 
 **`POST /api/plaid/exchange-token`**
-Exchanges a temporary public token for a permanent access token and stores the account in `plaid_accounts`.
+Exchanges a temporary public token for a permanent access token and stores the account in `plaid_accounts` with `user_id = current_user.id`.
 
 **`GET /api/plaid/accounts`**
-Returns all connected Plaid accounts (access tokens not exposed).
+Returns all connected Plaid accounts for the current user (access tokens not exposed).
 
 **`DELETE|PATCH /api/plaid/accounts/<id>`**
-Disconnects a Plaid account (DELETE) or renames its display name (PATCH).
+Disconnects a Plaid account (DELETE) or renames its display name (PATCH), scoped to current user.
 
 **`POST /api/plaid/fetch-transactions`**
-Fetches candidate transactions from all connected accounts since a given date, deduplicates against already-imported rows (by Plaid transaction ID), and filters out internal transfers via `_filter_internal_transfers`. Returns `{ candidates, filtered_out }`.
+Fetches candidate transactions from all of the current user's connected accounts since a given date, deduplicates against already-imported rows (by Plaid transaction ID), and filters out internal transfers via `_filter_internal_transfers`. Returns `{ candidates, filtered_out }`.
 
 **`POST /api/plaid/lookup-profiles`**
-Given a list of transaction descriptions, returns the existing category and tag profile for each: `unique` (all history consistent), `conflict` (history differs), or `none` (never seen). Used during import to auto-apply or prompt for resolution.
+Given a list of transaction descriptions, returns the existing category and tag profile for each (scoped to current user): `unique` (all history consistent), `conflict` (history differs), or `none` (never seen). Used during import to auto-apply or prompt for resolution.
 
 **`POST /api/plaid/lookup-shared-profiles`**
-Given a list of transaction descriptions, returns the most recent shared-expense split profile for each (who owes what). Used during import to pre-fill split configuration for recurring shared transactions.
+Given a list of transaction descriptions, returns the most recent shared-expense split profile for each (scoped to current user). Used during import to pre-fill split configuration for recurring shared transactions.
 
 **`POST /api/plaid/import-transactions`**
-Inserts selected transactions. For each: first checks whether an existing CSV-imported row (no Plaid ID) matches on date/description/amount/card_name and backfills the Plaid transaction ID onto it. If no such row exists, inserts a new row via `INSERT OR IGNORE`. If the insert is silently ignored due to the UNIQUE constraint on (date, description, amount, card_name) — which happens when Plaid changes a transaction's ID after the fact (e.g. pending → posted) — the existing row is updated to adopt the new Plaid ID so it stops resurfacing as a candidate. Also applies resolved tags and shared split data.
+Inserts selected transactions for the current user. For each: first checks whether an existing CSV-imported row (no Plaid ID) matches on date/description/amount/card_name and backfills the Plaid transaction ID onto it. If no such row exists, inserts a new row via `INSERT OR IGNORE`. If the insert is silently ignored due to the UNIQUE constraint — which happens when Plaid changes a transaction's ID after the fact (e.g. pending → posted) — the existing row is updated to adopt the new Plaid ID so it stops resurfacing as a candidate. Also applies resolved tags and shared split data.
 
 </details>
 
@@ -289,7 +363,7 @@ Inserts selected transactions. For each: first checks whether an existing CSV-im
 <details>
 <summary><strong>templates/index.html</strong></summary>
 
-The single HTML page. All tabs, tables, modals, and controls are defined here as static markup; `main.js` populates and drives them at runtime.
+The single HTML page (requires authentication). All tabs, tables, modals, and controls are defined here as static markup; `main.js` populates and drives them at runtime.
 
 **Tabs:** Overview · Import · Transactions · Shared Expenses · Detailed Breakdowns
 
@@ -319,7 +393,31 @@ The single HTML page. All tabs, tables, modals, and controls are defined here as
 - Candidate transaction table with conflict-resolution and shared-split modals
 - Filtered Out table showing automatically suppressed internal transfers with per-row Restore buttons
 
-**Data island:** Injects `TRACKED_CATEGORIES` as `<script type="application/json">` so `main.js` never needs a separate API call for the category list.
+**Settings modal (gear icon, top-right):**
+
+*Account tab:*
+- Profile section — edit display name and email
+- Change Password section — verify current password, set new one (min 8 characters)
+- Export Data — download all transactions as CSV
+- Session — Log Out button
+- Close Account (danger zone) — permanently deletes all data; requires email confirmation
+
+*Categories tab:*
+- Drag-to-reorder list of the user's spending categories
+- Inline rename (click to edit)
+- Delete (warns if transactions exist, requires confirmation)
+- Add new category input
+
+**Data island:** Injects the current user's ordered category list as `<script type="application/json">` so `main.js` never needs a separate API call for the category list on initial load.
+
+</details>
+
+---
+
+<details>
+<summary><strong>templates/login.html</strong></summary>
+
+Standalone login page served before the app shell. Displays a centred card with email and password fields. Flash messages (e.g. "Invalid email or password") appear inline above the form. Uses the same dark-theme CSS variables as the main app.
 
 </details>
 
@@ -336,7 +434,7 @@ All client-side logic. Drives every tab, modal, chart, and data fetch.
 - `overviewChartRange` — active time range for the Overview chart (`'1m'` / `'3m'` / `'6m'` / `'1y'` / `'5y'`)
 - `overviewSlide` — 0 = bar chart, 1 = Sankey
 - `allTransactions` — cached full transaction list used for client-side filtering
-- `TRACKED_CATEGORIES` — parsed from the page's JSON data island
+- `TRACKED_CATEGORIES` — parsed from the page's JSON data island; updated in-place after every category mutation so the frontend and backend stay in sync without a page reload
 
 ### Initialisation
 
@@ -368,6 +466,32 @@ Returns the HTML for a transaction's tag pills with inline × remove buttons.
 
 **`showStatus(message, type)`**
 Displays a success or error banner that auto-hides after 5 seconds.
+
+### Settings Modal
+
+**`openSettingsModal()` / `closeSettingsModal()`**
+Opens or closes the Settings modal and loads account data on open.
+
+**`switchSettingsTab(tab)`**
+Switches between the Account and Categories panels and updates tab button styles.
+
+**`loadAccountData()`**
+Fetches `/api/account` and pre-fills the profile fields.
+
+**`saveProfile()` / `changePassword()`**
+PATCH `/api/account/profile` and `/api/account/password` respectively; display inline status messages.
+
+**`exportData()`**
+Navigates to `/api/account/export` to trigger a CSV download.
+
+**`closeAccount()`**
+Sends a DELETE to `/api/account` with the email confirmation value; reloads the page on success.
+
+**`loadCategorySettings()`**
+Fetches the current category list and renders a sortable, editable list in the Categories panel.
+
+**`addCategory()` / `renameCategory(oldName, newName)` / `deleteCategory(name)` / `reorderCategories()`**
+CRUD operations on `/api/categories`; each refreshes the category list and updates `TRACKED_CATEGORIES`.
 
 ### Overview Tab
 
@@ -437,7 +561,7 @@ Opens the Add Transaction modal and submits to `/api/transaction/manual`.
 Shows or hides the payer and share rows in the Edit and Add modals.
 
 **`updateSharedSentence(prefix)`**
-Updates the "who paid / who owes" label and shows/hides the split-row container and "Add Person" button based on the current payer and transaction type. Does not add or remove share rows — row management is handled exclusively by `addShareRow` (via the "Add Person" button) and the per-row × remove button.
+Updates the "who paid / who owes" label and shows/hides the split-row container and "Add Person" button based on the current payer and transaction type.
 
 **`addShareRow(containerId, name, amount)`**
 Appends a person + amount row to the split container in the Edit or Add modal.
@@ -585,7 +709,14 @@ Create a `.env` file in the project root:
 ```
 PLAID_CLIENT_ID=your_client_id
 PLAID_SECRET=your_secret
-PLAID_ENV=sandbox   # or 'production'
+PLAID_ENV=sandbox        # or 'production'
+SECRET_KEY=a_long_random_string
+```
+
+`SECRET_KEY` is required for stable Flask sessions across restarts. Generate one with:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 ## Running Locally
@@ -595,4 +726,14 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The app starts on `http://0.0.0.0:5000`.
+The app starts on `http://0.0.0.0:5000`. On first run `init_db()` creates `budget.db` automatically.
+
+### Adding Users
+
+There is no self-registration. Create accounts with the CLI script:
+
+```bash
+python create_user.py
+```
+
+You will be prompted for an email and password. Run once per user you want to invite.
