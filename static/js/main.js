@@ -1817,8 +1817,7 @@ function toggleEditSharedFields() {
 
     fields.style.display = (status === 'shared') ? 'flex' : 'none';
 
-    // NEW: If shared is selected and the container is empty, add one row automatically
-    if (status === 'shared' && container.children.length === 0) {
+    if (status === 'shared') {
         updateSharedSentence('edit');
     }
 }
@@ -2166,16 +2165,6 @@ function updateSharedSentence(prefix) {
             if (btnAdd) btnAdd.style.display = 'none';
         } else {
             if (btnAdd) btnAdd.style.display = 'block';
-        }
-
-        const currentRows = container.querySelectorAll('.share-row');
-        if (currentRows.length === 0) {
-            addShareRow(containerId, '', amount);
-        } else {
-            const firstAmt = currentRows[0].querySelector('.share-amount-input').value;
-            const firstName = currentRows[0].querySelector('.share-name-select').value;
-            container.innerHTML = '';
-            addShareRow(containerId, firstName, firstAmt || amount);
         }
     }
 }

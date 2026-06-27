@@ -271,7 +271,7 @@ Returns all connected Plaid accounts (access tokens not exposed).
 Disconnects a Plaid account (DELETE) or renames its display name (PATCH).
 
 **`POST /api/plaid/fetch-transactions`**
-Fetches candidate transactions from all connected accounts since a given date, removes any already imported (by Plaid transaction ID), and filters out internal transfers via `_filter_internal_transfers`. Returns `{ candidates, filtered_out }`.
+Fetches candidate transactions from all connected accounts since a given date, deduplicates against already-imported rows (by Plaid transaction ID), and filters out internal transfers via `_filter_internal_transfers`. Returns `{ candidates, filtered_out }`.
 
 **`POST /api/plaid/lookup-profiles`**
 Given a list of transaction descriptions, returns the existing category and tag profile for each: `unique` (all history consistent), `conflict` (history differs), or `none` (never seen). Used during import to auto-apply or prompt for resolution.
@@ -280,7 +280,7 @@ Given a list of transaction descriptions, returns the existing category and tag 
 Given a list of transaction descriptions, returns the most recent shared-expense split profile for each (who owes what). Used during import to pre-fill split configuration for recurring shared transactions.
 
 **`POST /api/plaid/import-transactions`**
-Inserts selected transactions. For each: backfills `plaid_transaction_id` onto an existing CSV-imported row if one matches on date/description/amount, otherwise inserts a new row. Also applies resolved tags and shared split data.
+Inserts selected transactions. For each: first checks whether an existing CSV-imported row (no Plaid ID) matches on date/description/amount/card_name and backfills the Plaid transaction ID onto it. If no such row exists, inserts a new row via `INSERT OR IGNORE`. If the insert is silently ignored due to the UNIQUE constraint on (date, description, amount, card_name) — which happens when Plaid changes a transaction's ID after the fact (e.g. pending → posted) — the existing row is updated to adopt the new Plaid ID so it stops resurfacing as a candidate. Also applies resolved tags and shared split data.
 
 </details>
 
@@ -437,7 +437,7 @@ Opens the Add Transaction modal and submits to `/api/transaction/manual`.
 Shows or hides the payer and share rows in the Edit and Add modals.
 
 **`updateSharedSentence(prefix)`**
-Updates the "who paid / who owes" sentence in the shared fields based on the current payer and transaction type.
+Updates the "who paid / who owes" label and shows/hides the split-row container and "Add Person" button based on the current payer and transaction type. Does not add or remove share rows — row management is handled exclusively by `addShareRow` (via the "Add Person" button) and the per-row × remove button.
 
 **`addShareRow(containerId, name, amount)`**
 Appends a person + amount row to the split container in the Edit or Add modal.

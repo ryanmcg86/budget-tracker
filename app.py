@@ -1281,9 +1281,18 @@ def plaid_import_transactions():
                         1 if t.get('is_payment') else 0,
                         plaid_id,
                     ))
-                    new_id = cur.lastrowid
-                    if new_id:
+                    if cur.rowcount > 0:
+                        new_id = cur.lastrowid
                         inserted += 1
+                    else:
+                        # INSERT was silently ignored: a row with these exact coordinates
+                        # already exists but has a different Plaid ID (e.g. pending→posted).
+                        # Adopt the new ID so this transaction stops resurfacing as a candidate.
+                        cur.execute('''
+                            UPDATE transactions SET plaid_transaction_id = ?
+                            WHERE date = ? AND description = ? AND amount = ? AND card_name = ?
+                        ''', (plaid_id, t['date'], t['description'], t['amount'], t.get('card_name', '')))
+                        new_id = None
 
                 # Apply resolved tags if any
                 if new_id and resolved_tags:
