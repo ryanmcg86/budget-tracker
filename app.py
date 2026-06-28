@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import datetime as _dt
 from datetime import datetime
+from decimal import Decimal as _Decimal
 from dotenv import load_dotenv
 from database import init_db, insert_transactions, get_monthly_summary
 from auth import auth_bp, login_manager
@@ -16,6 +17,8 @@ class _ISODateProvider(DefaultJSONProvider):
     def default(o):
         if isinstance(o, (_dt.date, _dt.datetime)):
             return o.isoformat()
+        if isinstance(o, _Decimal):
+            return float(o)
         return DefaultJSONProvider.default(o)
 
 app = Flask(__name__)
@@ -297,7 +300,7 @@ def sankey_data():
         FROM transactions t
         WHERE t.is_payment = 1 AND t.user_id = %s {shared_filter}
           AND NOT EXISTS (SELECT 1 FROM payment_splits WHERE transaction_id = t.id)
-          AND COALESCE(t.applied_date, t.date) >= %s AND COALESCE(t.applied_date, t.date) <= %s
+          AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) >= %s AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) <= %s
     ''', (current_user.id, start_str, end_str))
     income = cur.fetchone()['total']
 
@@ -1075,7 +1078,7 @@ def breakdown_report():
             ({amount_sql_case}) as display_amount
         FROM transactions t
         WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({tag_placeholders}))
-        AND COALESCE(t.applied_date, t.date) >= %s AND COALESCE(t.applied_date, t.date) < %s
+        AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) >= %s AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) < %s
         {cat_clause} AND t.is_payment = 0 AND t.user_id = %s
         ORDER BY t.date DESC
     '''
@@ -1105,8 +1108,8 @@ def breakdown_report():
                 ELSE COALESCE(t.reimbursement_amount, 0)
             END) as total FROM transactions t
             WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({tag_placeholders}))
-            AND SUBSTR(COALESCE(t.applied_date, t.date), 1, 4) = %s
-            AND SUBSTR(COALESCE(t.applied_date, t.date), 6, 2) = %s
+            AND SUBSTR(COALESCE(t.applied_date, CAST(t.date AS TEXT)), 1, 4) = %s
+            AND SUBSTR(COALESCE(t.applied_date, CAST(t.date AS TEXT)), 6, 2) = %s
             {cat_clause} AND t.is_payment = 0 AND t.user_id = %s
         '''
         cursor.execute(sql, (*tag_ids, yr, mo, *cat_param, current_user.id))
