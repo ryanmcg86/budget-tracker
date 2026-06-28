@@ -1314,12 +1314,12 @@ def plaid_lookup_profiles():
 
     for desc in descriptions:
         cur.execute('''
-            SELECT t.id, t.category, GROUP_CONCAT(tg.name, '|||') as tag_names
+            SELECT t.id, t.category, STRING_AGG(tg.name, '|||') as tag_names
             FROM transactions t
             LEFT JOIN transaction_tags tt ON tt.transaction_id = t.id
             LEFT JOIN tags tg ON tg.id = tt.tag_id
             WHERE t.description = %s AND t.is_payment = 0 AND t.user_id = %s
-            GROUP BY t.id
+            GROUP BY t.id, t.category
         ''', (desc, current_user.id))
         rows = cur.fetchall()
 
