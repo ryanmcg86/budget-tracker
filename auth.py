@@ -15,14 +15,14 @@ class User(UserMixin):
     @staticmethod
     def get(user_id):
         conn = get_db_connection()
-        row = conn.execute('SELECT id, email FROM users WHERE id = ?', (user_id,)).fetchone()
+        row = conn.execute('SELECT id, email FROM users WHERE id = %s', (user_id,)).fetchone()
         conn.close()
         return User(row['id'], row['email']) if row else None
 
     @staticmethod
     def get_by_email(email):
         conn = get_db_connection()
-        row = conn.execute('SELECT id, email, password_hash FROM users WHERE email = ?', (email,)).fetchone()
+        row = conn.execute('SELECT id, email, password_hash FROM users WHERE email = %s', (email,)).fetchone()
         conn.close()
         return row
 
@@ -43,7 +43,10 @@ def login():
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '').encode()
         row = User.get_by_email(email)
-        if row and bcrypt.checkpw(password, row['password_hash']):
+        ph = row['password_hash'] if row else None
+        if ph and isinstance(ph, str):
+            ph = ph.encode('utf-8')
+        if row and bcrypt.checkpw(password, ph):
             login_user(User(row['id'], row['email']), remember=True)
             return redirect(url_for('index'))
         flash('Invalid email or password.')

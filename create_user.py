@@ -25,11 +25,11 @@ def main():
         print("Password must be at least 8 characters.")
         sys.exit(1)
 
-    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode('utf-8')
     conn = get_db_connection()
     try:
         conn.execute(
-            'INSERT INTO users (email, password_hash) VALUES (?, ?)',
+            'INSERT INTO users (email, password_hash) VALUES (%s, %s)',
             (email, hashed)
         )
         conn.commit()
