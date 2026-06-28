@@ -610,9 +610,9 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y', user_i
 def clean_account_names():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE transactions SET card_name = 'Chase' WHERE card_name LIKE '%Chase%'")
-    cursor.execute("UPDATE transactions SET card_name = 'Capital One' WHERE card_name LIKE '%Simply%'")
-    cursor.execute("UPDATE transactions SET card_name = 'Venmo' WHERE card_name LIKE '%Venmo%'")
+    cursor.execute("UPDATE transactions SET card_name = 'Chase' WHERE card_name LIKE %s", ('%Chase%',))
+    cursor.execute("UPDATE transactions SET card_name = 'Capital One' WHERE card_name LIKE %s", ('%Simply%',))
+    cursor.execute("UPDATE transactions SET card_name = 'Venmo' WHERE card_name LIKE %s", ('%Venmo%',))
     conn.commit()
     conn.close()
 
