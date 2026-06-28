@@ -370,9 +370,11 @@ def init_db():
                 pass
             cursor.execute(f'UPDATE {_tbl} SET user_id = 1 WHERE user_id IS NULL')
     else:
-        for _tbl in ['transactions', 'categories', 'settlements', 'transaction_shares',
-                     'tags', 'tag_defaults', 'payment_splits', 'plaid_accounts', 'breakdown_views']:
-            cursor.execute(f'UPDATE {_tbl} SET user_id = 1 WHERE user_id IS NULL')
+        row = cursor.execute('SELECT COUNT(*) as cnt FROM users').fetchone()
+        if row and row['cnt'] > 0:
+            for _tbl in ['transactions', 'categories', 'settlements', 'transaction_shares',
+                         'tags', 'tag_defaults', 'payment_splits', 'plaid_accounts', 'breakdown_views']:
+                cursor.execute(f'UPDATE {_tbl} SET user_id = 1 WHERE user_id IS NULL')
 
     conn.commit()
     conn.close()
