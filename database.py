@@ -72,6 +72,12 @@ class _SQLiteCursor:
 class _PGConn:
     def __init__(self, raw):
         self._raw = raw
+        import psycopg2.extensions as _ext
+        # Return DATE columns as "YYYY-MM-DD" strings, matching SQLite behaviour.
+        _ext.register_type(
+            _ext.new_type(_ext.DATE.values, 'DATE_AS_STR', lambda v, c: v),
+            raw
+        )
 
     def cursor(self):
         from psycopg2.extras import RealDictCursor

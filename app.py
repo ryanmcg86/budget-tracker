@@ -330,7 +330,7 @@ def sankey_data():
           AND COALESCE(applied_date, CAST(date AS TEXT)) >= %s AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
           AND category IN ({placeholders})
         GROUP BY category
-        HAVING total > 0
+        HAVING SUM({amount_case}) > 0
         ORDER BY total DESC
     ''', (current_user.id, start_str, end_str, *TRACKED_CATEGORIES))
     categories = [{'name': r['category'], 'total': round(r['total'], 2)} for r in cur.fetchall()]
