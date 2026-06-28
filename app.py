@@ -1367,6 +1367,26 @@ def _filter_internal_transfers(candidates):
                         to_remove.add(ta['plaid_transaction_id'])
                         to_remove.add(tb['plaid_transaction_id'])
 
+    # Capital One "Transfer Out From Apps" paired with a Venmo "Account Transfer"
+    # of the same amount within 3 days — keep the Venmo side, drop the Capital One side.
+    cap_one_app_transfers = [
+        t for t in candidates
+        if 'capital one' in t.get('card_name', '').lower()
+        and t.get('bank_category', '').lower() == 'transfer out transfer out from apps'
+    ]
+    venmo_account_transfers = [
+        t for t in candidates
+        if 'venmo' in t.get('card_name', '').lower()
+        and t.get('bank_category', '').lower() == 'transfer out account transfer'
+    ]
+    for tc in cap_one_app_transfers:
+        for tv in venmo_account_transfers:
+            if abs(tc['amount'] - tv['amount']) < 0.01:
+                date_c = date_type.fromisoformat(tc['date'])
+                date_v = date_type.fromisoformat(tv['date'])
+                if abs((date_c - date_v).days) <= 3:
+                    to_remove.add(tc['plaid_transaction_id'])
+
     kept    = [t for t in candidates if t['plaid_transaction_id'] not in to_remove]
     removed = [t for t in candidates if t['plaid_transaction_id'] in to_remove]
     return kept, removed
