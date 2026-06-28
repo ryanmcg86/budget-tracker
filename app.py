@@ -1346,7 +1346,7 @@ def plaid_lookup_profiles():
     return jsonify(result)
 
 
-def _filter_internal_transfers(candidates):
+def _filter_internal_transfers(candidates, imported_venmo_transfers=None):
     from datetime import date as date_type
 
     TRANSFER_PAIRS = [
@@ -1378,7 +1378,7 @@ def _filter_internal_transfers(candidates):
         t for t in candidates
         if 'venmo' in t.get('card_name', '').lower()
         and t.get('bank_category', '').lower() == 'transfer out account transfer'
-    ]
+    ] + (imported_venmo_transfers or [])
     for tc in cap_one_app_transfers:
         for tv in venmo_account_transfers:
             if abs(tc['amount'] - tv['amount']) < 0.01:
@@ -1439,6 +1439,15 @@ def plaid_fetch_transactions():
             (current_user.id,)
         )
         existing_ids = {r['plaid_transaction_id'] for r in cur.fetchall()}
+
+        cur.execute(
+            """SELECT amount, CAST(date AS TEXT) as date FROM transactions
+               WHERE user_id = %s
+               AND LOWER(bank_category) = 'transfer out account transfer'
+               AND LOWER(card_name) LIKE %s""",
+            (current_user.id, '%venmo%')
+        )
+        imported_venmo_transfers = [dict(r) for r in cur.fetchall()]
         conn.close()
 
         candidates = []
@@ -1450,7 +1459,7 @@ def plaid_fetch_transactions():
                     t['institution_name'] = acct['institution_name']
                     candidates.append(t)
 
-        candidates, filtered_out = _filter_internal_transfers(candidates)
+        candidates, filtered_out = _filter_internal_transfers(candidates, imported_venmo_transfers)
         refund_kept, refund_removed = _filter_refund_pairs(candidates)
         candidates = refund_kept
         filtered_out = filtered_out + refund_removed
