@@ -180,6 +180,7 @@ def delete_transaction(txn_id):
 
         cursor.execute('DELETE FROM settlements WHERE payment_id = %s OR expense_id = %s', (txn_id, txn_id))
         cursor.execute('DELETE FROM transaction_shares WHERE transaction_id = %s', (txn_id,))
+        cursor.execute('DELETE FROM transaction_tags WHERE transaction_id = %s', (txn_id,))
         cursor.execute('DELETE FROM transactions WHERE id = %s AND user_id = %s', (txn_id, current_user.id))
         conn.commit()
         conn.close()
