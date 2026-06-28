@@ -232,42 +232,38 @@
                 </div>
             </div>
 
-            <!-- Row 1: Monthly -->
+            <!-- Spending by Account -->
             <div class="overview-row">
                 <div class="table-container">
                     <div class="breakdown-head">
-                        <h3>Monthly: <span id="displayMonth"></span></h3>
-                        <span class="breakdown-total" id="monthlyTotalVal">$0.00</span>
+                        <h3>Spending by Account</h3>
+                        <span class="breakdown-total" id="accountTotalVal">$0.00</span>
                     </div>
-                    <div class="category-bars" id="monthlyTable"></div>
+                    <div class="category-bars" id="accountBreakdownTable"></div>
                 </div>
-                <div class="insight-panel" id="monthlyInsight"></div>
-            </div>
-        
-
-            <!-- Row 2: Yearly Total -->
-            <div class="overview-row">
-                <div class="table-container">
-                    <div class="breakdown-head">
-                        <h3>Yearly Total (<span id="displayYear"></span>)</h3>
-                        <span class="breakdown-total" id="yearlyTotalVal">$0.00</span>
-                    </div>
-                    <div class="category-bars" id="yearlyTable"></div>
-                </div>
-                <div class="insight-panel" id="yearlyInsight"></div>
             </div>
 
-            <!-- Row 3: Yearly Average -->
+            <!-- Table mode toggle -->
+            <div style="display:flex; gap:3px; background:var(--canvas); border:1px solid var(--border); border-radius:8px; padding:3px; margin-bottom:16px; width:fit-content;">
+                <button id="btnTableMonthly" onclick="switchOverviewTable('monthly')"
+                        style="padding:7px 16px; border:none; border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600; background:var(--surface-2); color:var(--ink); transition:all 0.15s;">Monthly</button>
+                <button id="btnTableYearly" onclick="switchOverviewTable('yearly')"
+                        style="padding:7px 16px; border:none; border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600; background:none; color:var(--muted); transition:all 0.15s;">Yearly</button>
+                <button id="btnTableAverage" onclick="switchOverviewTable('average')"
+                        style="padding:7px 16px; border:none; border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600; background:none; color:var(--muted); transition:all 0.15s;">Average</button>
+            </div>
+
+            <!-- Single overview row -->
             <div class="overview-row">
                 <div class="table-container">
                     <div class="breakdown-head">
-                        <h3>Yearly Average</h3>
-                        <span class="breakdown-total" id="avgTotalVal">$0.00</span>
+                        <h3 id="overviewTableTitle">Monthly</h3>
+                        <span class="breakdown-total" id="overviewTotalVal">$0.00</span>
                     </div>
-                    <div class="category-bars" id="averageTable"></div>
+                    <div class="category-bars" id="overviewTable"></div>
                 </div>
-                <div class="insight-panel" id="averageInsight"></div>
-            </div> <!-- Close Row 3 -->
+                <div class="insight-panel" id="overviewInsight"></div>
+            </div>
         </div> <!-- CLOSE OVERVIEW TAB -->
 
         <!-- TRANSACTIONS TAB -->
@@ -489,7 +485,9 @@
         <!-- DETAILED BREAKDOWNS TAB -->
         <div id="detailedBreakdowns" class="tab-content">
             <div class="controls" style="display: flex; gap: 15px; margin-bottom: 20px;">
-                <select id="breakdownCategory" onchange="loadBreakdownView()" style="flex: 2;"></select>
+                <select id="breakdownCategory" onchange="loadBreakdownView()" style="flex: 2;">
+                    <option value="">All Categories</option>
+                </select>
                 <select id="breakdownYear" onchange="updateBreakdownMonthDropdown(); loadBreakdownData();"></select>
                 <select id="breakdownMonth" onchange="loadBreakdownData()"></select>
             </div>
@@ -594,6 +592,7 @@
                                     <th>Description</th>
                                     <th>Account</th>
                                     <th>Bank Category</th>
+                                    <th>Status</th>
                                     <th style="text-align: right;">Amount</th>
                                 </tr>
                             </thead>
@@ -814,8 +813,8 @@
     </div>
 
     <!-- Edit Transaction Modal -->
-    <div id="editModal" class="modal" style="display:none; position:fixed; z-index:100; left:0; top:0; width:100%; height:100%; background-color: rgba(0,0,0,0.5);">
-        <div class="modal-content" style="background-color:white; margin:10% auto; padding:25px; border-radius:12px; width:90%; max-width:500px;">
+    <div id="editModal" class="modal" style="display:none; position:fixed; z-index:100; left:0; top:0; width:100%; height:100%; background-color: rgba(0,0,0,0.5); overflow-y:auto;">
+        <div class="modal-content" style="background-color:white; margin:5% auto; padding:25px; border-radius:12px; width:90%; max-width:500px; max-height:88vh; overflow-y:auto;">
             <h3>Edit Transactions</h3>
             <p id="editModalSub" style="font-size: 0.8em; color: #666; margin-bottom: 20px;"></p>
         

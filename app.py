@@ -248,6 +248,35 @@ def overview_history():
     return jsonify(data)
 
 
+@app.route('/api/account-breakdown')
+@login_required
+def account_breakdown():
+    year = request.args.get('year')
+    month = request.args.get('month')
+    view_mode = request.args.get('view_mode', 'gross')
+
+    if view_mode == 'gross':
+        amount_case = "CASE WHEN payer = 'Me' THEN amount ELSE 0 END"
+    else:
+        amount_case = "CASE WHEN payer = 'Me' THEN (amount - COALESCE(reimbursement_amount, 0)) ELSE COALESCE(reimbursement_amount, 0) END"
+
+    from database import get_db_connection
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(f'''
+        SELECT card_name, SUM({amount_case}) as total
+        FROM transactions
+        WHERE user_id = ? AND is_payment = 0
+          AND strftime('%Y', COALESCE(applied_date, date)) = ?
+          AND strftime('%m', COALESCE(applied_date, date)) = ?
+        GROUP BY card_name
+        ORDER BY total DESC
+    ''', (current_user.id, year, month))
+    rows = [{'name': r['card_name'] or 'Unknown', 'total': round(r['total'] or 0, 2)} for r in cur.fetchall()]
+    conn.close()
+    return jsonify({'accounts': rows})
+
+
 @app.route('/api/sankey-data')
 def sankey_data():
     from database import get_db_connection, get_categories
@@ -940,7 +969,18 @@ def manage_tags():
         conn.close()
         return jsonify({'success': True})
     
-    cursor.execute('SELECT * FROM tags WHERE user_id = ? ORDER BY name', (current_user.id,))
+    category = request.args.get('category', '').strip()
+    if category:
+        cursor.execute('''
+            SELECT DISTINCT t.id, t.name
+            FROM tags t
+            JOIN transaction_tags tt ON tt.tag_id = t.id
+            JOIN transactions tx ON tx.id = tt.transaction_id
+            WHERE t.user_id = ? AND tx.user_id = ? AND tx.category = ?
+            ORDER BY t.name
+        ''', (current_user.id, current_user.id, category))
+    else:
+        cursor.execute('SELECT * FROM tags WHERE user_id = ? ORDER BY name', (current_user.id,))
     tags = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify(tags)
@@ -1073,17 +1113,20 @@ def breakdown_report():
         END
     '''
 
+    cat_clause = 'AND t.category = ?' if category else ''
+    cat_param  = (category,) if category else ()
+
     table_sql = f'''
         SELECT
-            t.id, t.date, t.description,
+            t.id, t.date, t.description, t.category,
             ({amount_sql_case}) as display_amount
         FROM transactions t
         WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({",".join(["?"]*len(tag_ids))}))
         AND COALESCE(t.applied_date, t.date) >= ? AND COALESCE(t.applied_date, t.date) < ?
-        AND t.category = ? AND t.is_payment = 0 AND t.user_id = ?
+        {cat_clause} AND t.is_payment = 0 AND t.user_id = ?
         ORDER BY t.date DESC
     '''
-    cursor.execute(table_sql, (*tag_ids, start_str, end_str, category, current_user.id))
+    cursor.execute(table_sql, (*tag_ids, start_str, end_str, *cat_param, current_user.id))
     rows = cursor.fetchall()
     table_data = []
     for r in rows:
@@ -1114,9 +1157,9 @@ def breakdown_report():
             END) FROM transactions t
             WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id IN ({",".join(["?"]*len(tag_ids))}))
             AND strftime('%Y', COALESCE(t.applied_date, t.date)) = ? AND strftime('%m', COALESCE(t.applied_date, t.date)) = ?
-            AND t.category = ? AND t.is_payment = 0 AND t.user_id = ?
+            {cat_clause} AND t.is_payment = 0 AND t.user_id = ?
         '''
-        cursor.execute(sql, (*tag_ids, yr, mo, category, current_user.id))
+        cursor.execute(sql, (*tag_ids, yr, mo, *cat_param, current_user.id))
         month_total = cursor.fetchone()[0] or 0
         graph_data.append({'month': current_date.strftime('%b %Y'), 'total': month_total})
         current_date += relativedelta(months=1)
@@ -1400,6 +1443,37 @@ def _filter_internal_transfers(candidates):
     return kept, removed
 
 
+def _filter_refund_pairs(candidates):
+    """Remove purchase/refund pairs from import candidates.
+
+    When the same merchant appears with equal and opposite amounts within
+    a 45-day window it indicates a refunded purchase — both sides are filtered.
+    """
+    from datetime import date as date_type
+    from collections import defaultdict
+
+    by_desc = defaultdict(list)
+    for t in candidates:
+        by_desc[t['description'].lower().strip()].append(t)
+
+    to_remove = set()
+    for txns in by_desc.values():
+        if len(txns) < 2:
+            continue
+        for i, ta in enumerate(txns):
+            for tb in txns[i + 1:]:
+                if abs(ta['amount'] + tb['amount']) < 0.01:
+                    date_a = date_type.fromisoformat(ta['date'])
+                    date_b = date_type.fromisoformat(tb['date'])
+                    if abs((date_a - date_b).days) <= 45:
+                        to_remove.add(ta['plaid_transaction_id'])
+                        to_remove.add(tb['plaid_transaction_id'])
+
+    kept   = [t for t in candidates if t['plaid_transaction_id'] not in to_remove]
+    removed = [t for t in candidates if t['plaid_transaction_id'] in to_remove]
+    return kept, removed
+
+
 @app.route('/api/plaid/fetch-transactions', methods=['POST'])
 def plaid_fetch_transactions():
     """
@@ -1438,6 +1512,9 @@ def plaid_fetch_transactions():
                     candidates.append(t)
 
         candidates, filtered_out = _filter_internal_transfers(candidates)
+        refund_kept, refund_removed = _filter_refund_pairs(candidates)
+        candidates = refund_kept
+        filtered_out = filtered_out + refund_removed
 
         # Sort newest first so the most recent transactions are at the top
         candidates.sort(key=lambda x: x['date'], reverse=True)

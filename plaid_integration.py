@@ -150,4 +150,5 @@ def _shape_transaction(plaid_txn):
         'category': '',          # left blank — user assigns via Edit
         'is_payment': amount < 0,
         'card_name': '',         # filled in by the route using the account's card_name
+        'pending': bool(plaid_txn.get('pending', False)),
     }

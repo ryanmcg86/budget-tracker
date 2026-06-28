@@ -2,6 +2,7 @@ let currentViewMode = 'net'; // Default
 let savedPeople = []; // Global list of names
 let allTransactions = []; // Global variable to hold data for filtering
 let isModalPaymentMode = false; // Tracks if the current modal is for a payment
+let _currentEditAmount = null;  // Amount of the transaction currently open in the edit modal
 
 // Populated from the JSON embed on page load; updated via loadCategories() after any mutation.
 let TRACKED_CATEGORIES = JSON.parse(document.getElementById('trackedCategoriesData').textContent);
@@ -33,6 +34,9 @@ function setupCategoryDropdowns() {
             staticOptions = Array.from(select.options).filter(o =>
                 o.value === '' || o.value === '__uncategorized__'
             );
+        }
+        if (select.id === 'breakdownCategory') {
+            staticOptions = Array.from(select.options).filter(o => o.value === '');
         }
 
         // Clear the dropdown
@@ -200,28 +204,20 @@ async function loadSummary() {
     const year = yearSelect.value;
     const month = monthSelect.value;
     
-    // Update the UI labels
-    const displayMonth = document.getElementById('displayMonth');
-    const displayYear = document.getElementById('displayYear');
-    if (displayMonth) displayMonth.textContent = monthSelect.options[monthSelect.selectedIndex].text;
-    if (displayYear) displayYear.textContent = year;
-
     try {
         const response = await fetch(`/api/detailed-summary?year=${year}&month=${month}`);
         const data = await response.json();
-        
-        // Pass the correct keys from the backend response.
-        // Each render is isolated so one failing section can't blank the rest of the dashboard.
+
         const safe = (fn, label) => { try { fn(); } catch (e) { console.error('Overview render failed:', label, e); } };
 
-        safe(() => updateOverviewTable('monthlyTable', data.month_totals), 'monthlyTable');
-        safe(() => updateOverviewTable('yearlyTable',  data.year_totals),   'yearlyTable');
-        safe(() => updateOverviewTable('averageTable', data.year_averages), 'averageTable');
-
-        // Context panels beside each table (replaces the old per-table charts)
+        _overviewTableData = {
+            monthly: data.month_totals,
+            yearly:  data.year_totals,
+            average: data.year_averages
+        };
+        safe(() => renderActiveOverviewTable(), 'overviewTable');
         safe(() => loadOverviewInsights(), 'overviewInsights');
-
-        // Update the chart panel (bar chart or Sankey depending on active slide)
+        safe(() => loadAccountBreakdown(), 'accountBreakdown');
         safe(() => loadCurrentOverviewChart(), 'overviewHistory');
     } catch (error) {
         console.error('Error loading summary:', error);
@@ -231,6 +227,46 @@ async function loadSummary() {
 let overviewChartRange = '6m'; // Default chart range for the Monthly Spending Trend graph
 let overviewSlide = 0;    // 0 = bar chart, 1 = Sankey
 let sankeyAvgMode = false; // false = Total, true = Avg/mo
+let _overviewTableMode = 'monthly';
+let _overviewTableData = {};
+let _overviewInsightData = {};
+let _overviewHistory = null;
+
+function switchOverviewTable(mode) {
+    _overviewTableMode = mode;
+    ['monthly', 'yearly', 'average'].forEach(m => {
+        const btn = document.getElementById('btnTable' + m.charAt(0).toUpperCase() + m.slice(1));
+        if (!btn) return;
+        btn.style.background = m === mode ? 'var(--surface-2)' : 'none';
+        btn.style.color = m === mode ? 'var(--ink)' : 'var(--muted)';
+    });
+    renderActiveOverviewTable();
+}
+
+function renderActiveOverviewTable() {
+    const yearSelect = document.getElementById('yearSelect');
+    const monthSelect = document.getElementById('monthSelect');
+    if (!yearSelect || !monthSelect) return;
+    const year = yearSelect.value;
+    const monthLabel = monthSelect.options[monthSelect.selectedIndex]?.text || '';
+
+    const titleEl = document.getElementById('overviewTableTitle');
+    if (titleEl) {
+        const titles = {
+            monthly: `Monthly: ${monthLabel}`,
+            yearly:  `Yearly Total (${year})`,
+            average: 'Yearly Average'
+        };
+        titleEl.textContent = titles[_overviewTableMode] || '';
+    }
+
+    updateOverviewTable('overviewTable', _overviewTableData[_overviewTableMode] || {});
+
+    const insightEl = document.getElementById('overviewInsight');
+    if (insightEl && _overviewInsightData[_overviewTableMode] != null) {
+        insightEl.innerHTML = _overviewInsightData[_overviewTableMode];
+    }
+}
 
 function setOverviewSlide(index) {
     overviewSlide = index;
@@ -347,15 +383,42 @@ async function loadSankeyChart() {
         return `rgba(${r},${g},${b},${a})`;
     };
 
+    // Manual node positions so Savings sits clearly below the expense categories.
+    // x: 0=left edge, 1=right edge. y: 0=top, 1=bottom (Plotly Sankey convention).
+    const nCats = categories.length;
+    const hasSavings = savings > 0.01;
+    const hasDeficit = savings < -0.01;
+
+    const nodeX = [0.01]; // Income: far left
+    const nodeY = [0.5];  // Income: vertically centred
+
+    // Expense categories occupy the top 68% of the right column (or full height if no savings)
+    const catBotY = hasSavings ? 0.66 : 0.95;
+    categories.forEach((_, i) => {
+        nodeX.push(0.99);
+        nodeY.push(nCats > 1 ? 0.02 + (i / (nCats - 1)) * (catBotY - 0.02) : (0.02 + catBotY) / 2);
+    });
+
+    if (hasSavings) {
+        nodeX.push(0.99);
+        nodeY.push(0.95); // Savings: far bottom-right, visually separated
+    } else if (hasDeficit) {
+        nodeX.push(0.01);
+        nodeY.push(0.88); // Deficit: bottom-left
+    }
+
     const trace = {
         type: 'sankey',
         orientation: 'h',
+        arrangement: 'fixed',
         node: {
-            pad: 15, thickness: 20,
+            pad: 12, thickness: 20,
             line: { color: 'rgba(0,0,0,0)', width: 0 },
             label: nodeLabels,
             color: nodeColors,
             customdata: nodeCustom,
+            x: nodeX,
+            y: nodeY,
             hovertemplate: '<b>%{label}</b><br>$%{customdata:,.2f}<extra></extra>'
         },
         link: {
@@ -597,11 +660,6 @@ async function loadOverviewInsights() {
     const monthSelect = document.getElementById('monthSelect');
     if (!yearSelect || !monthSelect || !yearSelect.value) return;
 
-    const mMonthly = document.getElementById('monthlyInsight');
-    const mYearly  = document.getElementById('yearlyInsight');
-    const mAverage = document.getElementById('averageInsight');
-    if (!mMonthly) return;
-
     try {
         const year = yearSelect.value;
         const month = monthSelect.value;
@@ -609,6 +667,7 @@ async function loadOverviewInsights() {
         const params = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: '5y' });
         const res = await fetch(`/api/overview-history?${params.toString()}`);
         const data = await res.json();
+        _overviewHistory = data;
         const months = data.months || [];
         const cats = data.categories || {};
         const n = months.length;
@@ -665,7 +724,7 @@ async function loadOverviewInsights() {
         if (prev != null) { const d = cur - prev; mSub = `${money0(Math.abs(d))} ${d < 0 ? 'less' : 'more'} than ${short(months[L - 1])}`; }
         else { mSub = 'First recorded month'; }
 
-        mMonthly.innerHTML = `
+        _overviewInsightData.monthly = `
             <div class="ins-tag">vs. recent months</div>
             <div class="ins-hero"><span class="ins-big">${money0(cur)}</span>${chip(cur, prev)}</div>
             <div class="ins-sub">${mSub}</div>
@@ -697,7 +756,7 @@ async function loadOverviewInsights() {
             ? `<div class="ins-spark">${tyTotals.map((v, k) => `<span style="height:${Math.max(8, v / sparkMax * 100)}%;${k === tyTotals.length - 1 ? 'opacity:1;' : ''}"></span>`).join('')}</div>`
             : '';
 
-        if (mYearly) mYearly.innerHTML = `
+        _overviewInsightData.yearly = `
             <div class="ins-tag">vs. last year &amp; pace</div>
             <div class="ins-hero"><span class="ins-big">${kAbbr(ytd)}</span>${chip(ytd, lyPaceTotal)}</div>
             <div class="ins-sub">${monthsElapsed} ${monthsElapsed === 1 ? 'month' : 'months'} recorded${lyPaceTotal != null ? ` · ${money0(Math.abs(ytd - lyPaceTotal))} ${ytd < lyPaceTotal ? 'under' : 'over'} last year's pace` : ''}</div>
@@ -725,7 +784,7 @@ async function loadOverviewInsights() {
         cv.sort((a, b) => a.v - b.v);
         const lyAvg = (lyFull != null && lyIdx.length) ? lyFull / lyIdx.length : null;
 
-        if (mAverage) mAverage.innerHTML = `
+        _overviewInsightData.average = `
             <div class="ins-tag">typical month, ${year}</div>
             <div class="ins-hero"><span class="ins-big">${money0(avgMonth)}</span>${chip(avgMonth, lyAvg)}</div>
             <div class="ins-sub">${lyAvg != null ? `${money0(Math.abs(avgMonth - lyAvg))} ${avgMonth < lyAvg ? 'lower' : 'higher'} than last year` : 'Per-month average across ' + monthsElapsed + ' ' + (monthsElapsed === 1 ? 'month' : 'months')}</div>
@@ -735,6 +794,8 @@ async function loadOverviewInsights() {
             ${row('Month-to-month swing', swing != null ? '±' + money0(swing) : '—')}
             ${cv.length ? `<div class="ins-div"></div><div class="ins-note">Most consistent: <b>${cv[0].c}</b> · Most variable: <b>${cv[cv.length - 1].c}</b></div>` : ''}
         `;
+
+        renderActiveOverviewTable();
     } catch (e) {
         console.error('Overview insights failed:', e);
     }
@@ -864,37 +925,64 @@ function updateOverviewTable(tableId, dataMap) {
     const grandTotal = rows.reduce((s, r) => s + r.amount, 0);
     const maxAmount = Math.max(...rows.map(r => r.amount), 0);
 
-    // 2. Hide empty categories and sort biggest-spend first
+    // 2. Build MoM delta lookup (monthly mode only)
+    let priorAmounts = null;
+    if (_overviewTableMode === 'monthly' && _overviewHistory) {
+        const yearEl = document.getElementById('yearSelect');
+        const monthEl = document.getElementById('monthSelect');
+        const MABBR = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const curLabel = MABBR[parseInt(monthEl?.value || '0')] + ' ' + (yearEl?.value || '');
+        const idx = (_overviewHistory.months || []).indexOf(curLabel);
+        if (idx > 0) {
+            priorAmounts = {};
+            TRACKED_CATEGORIES.forEach(c => {
+                const ser = (_overviewHistory.categories || {})[c] || [];
+                const prev = ser[idx - 1];
+                priorAmounts[c] = (prev && typeof prev === 'object') ? (currentViewMode === 'gross' ? (prev.gross || 0) : (prev.net || 0)) : (prev || 0);
+            });
+        }
+    }
+
+    // 3. Hide empty categories and sort biggest-spend first
     const visible = rows.filter(r => r.amount > 0.005).sort((a, b) => b.amount - a.amount);
 
-    // 3. Render as a horizontal-bar breakdown (category · bar · amount · % of total)
+    // 4. Render as a horizontal-bar breakdown (category · bar · amount · % of total · MoM delta)
     container.innerHTML = visible.map(r => {
         const pct = grandTotal > 0 ? (r.amount / grandTotal * 100) : 0;
         const barPct = maxAmount > 0 ? (r.amount / maxAmount * 100) : 0;
         const amtStr = r.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        let deltaInner = '';
+        if (priorAmounts !== null) {
+            const prior = priorAmounts[r.cat] || 0;
+            if (prior > 0.005) {
+                const delta = (r.amount - prior) / prior * 100;
+                const up = delta >= 0;
+                deltaInner = `<span class="ins-chip ${up ? 'up' : 'down'}">${up ? '↑' : '↓'} ${Math.abs(delta).toFixed(0)}%</span>`;
+            } else {
+                deltaInner = `<span class="ins-chip none">—</span>`;
+            }
+        }
+        const deltaBadge = deltaInner
+            ? `<div style="width:72px; flex-shrink:0; display:flex; justify-content:flex-end;">${deltaInner}</div>`
+            : '';
         return `
             <div class="cat-row">
                 <div class="cat-name">${r.cat}</div>
                 <div class="cat-track"><div class="cat-fill" style="width:${barPct.toFixed(1)}%; background:${r.color};"></div></div>
                 <div class="cat-amount">$${amtStr}</div>
                 <div class="cat-pct">${Math.round(pct)}%</div>
+                ${deltaBadge}
             </div>
         `;
     }).join('') || '<div class="loading">No spending in this period</div>';
 
-    // 4. Update the total shown in the section header
+    // 5. Update the total shown in the section header
     const totalLabel = `$${grandTotal.toLocaleString(undefined, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     })}`;
-
-    if (tableId === 'monthlyTable') {
-        const el = document.getElementById('monthlyTotalVal'); if (el) el.textContent = totalLabel;
-    } else if (tableId === 'yearlyTable') {
-        const el = document.getElementById('yearlyTotalVal'); if (el) el.textContent = totalLabel;
-    } else if (tableId === 'averageTable') {
-        const el = document.getElementById('avgTotalVal'); if (el) el.textContent = totalLabel;
-    }
+    const totalEl = document.getElementById('overviewTotalVal');
+    if (totalEl) totalEl.textContent = totalLabel;
 }
 
 async function saveRule() {
@@ -1011,8 +1099,9 @@ async function loadBreakdownView() {
     // Populate/update Month Dropdown to limit months for the current year
     updateBreakdownMonthDropdown();
 
-    // Load Tag Checklist
-    const response = await fetch('/api/tags');
+    // Load Tag Checklist — scoped to the selected category
+    const selectedCategory = document.getElementById('breakdownCategory').value;
+    const response = await fetch(`/api/tags${selectedCategory ? '?category=' + encodeURIComponent(selectedCategory) : ''}`);
     const tags = await response.json();
     const container = document.getElementById('tagCheckboxes');
     container.innerHTML = tags.map(t => `
@@ -1121,11 +1210,14 @@ async function loadBreakdownData() {
             `;
 
             rows.forEach(row => {
+                const catBadge = !category && row.category
+                    ? `<span style="font-size:0.75em; font-weight:600; padding:1px 7px; border-radius:10px; background:var(--surface-2); color:var(--muted); margin-left:4px;">${row.category}</span>`
+                    : '';
                 html += `
                     <tr>
                         <td style="white-space: nowrap;">${formatDate(row.date)}</td>
                         <td>
-                            <div style="font-weight: 600;">${row.description}</div>
+                            <div style="font-weight: 600;">${row.description}${catBadge}</div>
                             ${renderTxnTags(row)}
                         </td>
                         <td style="text-align:right; font-weight:700; white-space: nowrap;">$${row.display_amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
@@ -1778,11 +1870,13 @@ async function openEditModal() {
     isModalPaymentMode = isPaymentEdit;
     
     // 1. Initial Reset
+    _currentEditAmount = null;
     document.getElementById('shareRowsContainer').innerHTML = '';
     document.getElementById('editDesc').value = '';
     document.getElementById('editSharedStatus').value = 'no_change';
     document.getElementById('sharedFields').style.display = 'none';
     document.getElementById('editAppliedDate').value = '';
+    document.getElementById('editPaymentAmount').value = '';
     document.getElementById('splitRowsContainer').innerHTML = '';
     document.getElementById('appliedDateSection').style.display = 'none';
     document.getElementById('paymentSplitsSection').style.display = 'none';
@@ -1796,6 +1890,7 @@ async function openEditModal() {
     if (ids.length === 1) {
         const response = await fetch(`/api/transaction/${ids[0]}/details`);
         const txn = await response.json();
+        _currentEditAmount = Math.abs(parseFloat(txn.amount) || 0);
 
         // Show applied date section and pre-fill if set
         document.getElementById('appliedDateSection').style.display = 'block';
@@ -1987,6 +2082,44 @@ function getAccountClass(accountName) {
     return 'tag-account tag-other';
 }
 
+async function loadAccountBreakdown() {
+    const yearSelect = document.getElementById('yearSelect');
+    const monthSelect = document.getElementById('monthSelect');
+    if (!yearSelect || !monthSelect || !yearSelect.value) return;
+    const year = yearSelect.value;
+    const month = monthSelect.value;
+    const params = new URLSearchParams({ year, month, view_mode: currentViewMode });
+    try {
+        const res = await fetch(`/api/account-breakdown?${params}`);
+        const data = await res.json();
+        const accounts = data.accounts || [];
+        const container = document.getElementById('accountBreakdownTable');
+        const totalEl = document.getElementById('accountTotalVal');
+        if (!container) return;
+        const grandTotal = accounts.reduce((s, a) => s + a.total, 0);
+        const maxTotal = Math.max(...accounts.map(a => a.total), 1);
+        const ACCT_COLORS = ['#34A77B','#5B9BD5','#D2A859','#9B7BD0','#E0795F','#4FB6A8','#D27FB0','#8FB04F'];
+        container.innerHTML = accounts.map((a, i) => {
+            const pct = grandTotal > 0 ? (a.total / grandTotal * 100) : 0;
+            const barPct = maxTotal > 0 ? (a.total / maxTotal * 100) : 0;
+            const amtStr = a.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return `
+                <div class="cat-row">
+                    <div class="cat-name">${a.name || 'Unknown'}</div>
+                    <div class="cat-track"><div class="cat-fill" style="width:${barPct.toFixed(1)}%; background:${ACCT_COLORS[i % ACCT_COLORS.length]};"></div></div>
+                    <div class="cat-amount">$${amtStr}</div>
+                    <div class="cat-pct">${Math.round(pct)}%</div>
+                </div>
+            `;
+        }).join('') || '<div class="loading">No data for this period</div>';
+        if (totalEl) {
+            totalEl.textContent = '$' + grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+    } catch (e) {
+        console.error('loadAccountBreakdown failed:', e);
+    }
+}
+
 function setViewMode(mode) {
     currentViewMode = mode;
     
@@ -1997,7 +2130,8 @@ function setViewMode(mode) {
     if (btnNet) btnNet.classList.toggle('active', mode === 'net');
     
     // Refresh everything
-    loadSummary(); 
+    loadSummary();
+    loadAccountBreakdown();
 }
 
 function clearSharedFilters() {
@@ -2161,19 +2295,6 @@ async function processSettlement() {
 }
 
 
-function toggleEditSharedFields() {
-    const status = document.getElementById('editSharedStatus').value;
-    const payerDropdown = document.getElementById('editPayer');
-    const fields = document.getElementById('sharedFields');
-
-    // Only show the extra fields if "Shared" is selected
-    fields.style.display = (status === 'shared') ? 'flex' : 'none';
-
-    // Optional: If you have an amount box elsewhere, you can update its placeholder here
-    if (payerDropdown) {
-        console.log("Current Payer:", payerDropdown.value);
-    }
-}
 
 
 async function refreshSavedPeople() {
@@ -2203,9 +2324,9 @@ function updateSharedSentence(prefix) {
 
         payerLabel.textContent = "paid you";
         
-        // Sync modal amount to payment row if empty
+        // Pre-fill with the current transaction's amount
         const amtInput = document.getElementById(prefix + 'PaymentAmount');
-        if (!amtInput.value) amtInput.value = amount;
+        if (!amtInput.value) amtInput.value = _currentEditAmount != null ? _currentEditAmount : (amount || '');
         
     } else {
         // Expense UI: Use multi-line splits
@@ -2501,15 +2622,21 @@ function renderPlaidCandidates() {
         const amountColor = amount < 0 ? '#27ae60' : '#e74c3c';
         const amountLabel = amount < 0 ? `<span style="color:${amountColor}">+${amountStr}</span>`
                                         : `<span style="color:${amountColor}">-${amountStr}</span>`;
+        const isPending = t.pending === true;
+        const statusBadge = isPending
+            ? `<span style="font-size:0.8em; font-weight:600; padding:2px 8px; border-radius:10px; background:#fff3cd; color:#856404;">Pending</span>`
+            : `<span style="font-size:0.8em; font-weight:600; padding:2px 8px; border-radius:10px; background:#d1e7dd; color:#0f5132;">Settled</span>`;
+        const rowStyle = isPending ? 'opacity:0.55;' : '';
         return `
-            <tr>
+            <tr style="${rowStyle}">
                 <td style="text-align: center;">
-                    <input type="checkbox" class="plaid-candidate-check" data-index="${i}" checked>
+                    <input type="checkbox" class="plaid-candidate-check" data-index="${i}" ${isPending ? 'disabled title="Wait for this transaction to settle before importing"' : ''}>
                 </td>
                 <td>${t.date}</td>
                 <td>${t.description}</td>
                 <td style="font-size: 0.85em; color: #666;">${t.institution_name} — ${t.card_name}</td>
                 <td style="font-size: 0.85em; color: #888;">${t.bank_category || '—'}</td>
+                <td>${statusBadge}</td>
                 <td style="text-align: right;">${amountLabel}</td>
             </tr>
         `;
@@ -2519,7 +2646,9 @@ function renderPlaidCandidates() {
 }
 
 function plaidSelectAll(checked) {
-    document.querySelectorAll('.plaid-candidate-check').forEach(cb => cb.checked = checked);
+    document.querySelectorAll('.plaid-candidate-check').forEach(cb => {
+        if (!cb.disabled) cb.checked = checked;
+    });
 }
 
 function moveToFiltered() {
