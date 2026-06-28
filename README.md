@@ -1,8 +1,10 @@
 # Spending Tracker
 
-A personal finance web app built with Flask and SQLite. Transactions can be imported via CSV upload or fetched live from connected bank accounts through the Plaid API. The app tracks spending by category, handles shared expenses and bill splitting across multiple people, and provides detailed breakdowns with tagging and saved views.
+A personal finance web app built with Flask. Transactions can be imported via CSV upload or fetched live from connected bank accounts through the Plaid API. The app tracks spending by category, handles shared expenses and bill splitting across multiple people, and provides detailed breakdowns with tagging and saved views.
 
 Access is invite-only — there is no public registration. Each user's data is fully isolated; every query is scoped to `current_user.id`.
+
+Runs on **SQLite locally** (zero config) and **PostgreSQL in production** (auto-detected via `DATABASE_URL`).
 
 ---
 
@@ -10,16 +12,17 @@ Access is invite-only — there is no public registration. Each user's data is f
 
 ```
 spending-tracker/
-├── app.py                  # Flask application — all API routes
-├── auth.py                 # Flask-Login setup, User model, login/logout routes
-├── create_user.py          # CLI script to create new invite-only user accounts
-├── database.py             # Database schema, migrations, and query helpers
-├── plaid_integration.py    # Plaid API client (link tokens, token exchange, transaction fetch)
-├── static/js/main.js       # All frontend logic (vanilla JS + Plotly)
-├── static/css/style.css    # Dark-theme stylesheet
-├── templates/index.html    # Single-page HTML shell (authenticated)
-├── templates/login.html    # Login page
-└── budget.db               # SQLite database (auto-created on first run)
+├── app.py                    # Flask application — all API routes
+├── auth.py                   # Flask-Login setup, User model, login/logout routes
+├── create_user.py            # CLI script to create new invite-only user accounts
+├── database.py               # DB connection wrappers, schema, migrations, query helpers
+├── migrate_to_postgres.py    # One-time script to copy SQLite data into PostgreSQL
+├── plaid_integration.py      # Plaid API client (link tokens, token exchange, transaction fetch)
+├── static/js/main.js         # All frontend logic (vanilla JS + Plotly)
+├── static/css/style.css      # Dark-theme stylesheet
+├── templates/index.html      # Single-page HTML shell (authenticated)
+├── templates/login.html      # Login page
+└── budget.db                 # SQLite database (auto-created on first run; local dev only)
 ```
 
 ---
@@ -66,7 +69,13 @@ Prompts for email and password (with confirmation), hashes the password with bcr
 <details>
 <summary><strong>database.py</strong></summary>
 
-Owns the database layer. All other files import from here rather than opening `budget.db` directly.
+Owns the database layer. All other files import from here rather than opening the database directly.
+
+### Dual-database design
+
+All SQL is written with `%s` placeholders (PostgreSQL style). When `DATABASE_URL` is not set, `get_db_connection()` returns a `_SQLiteConn` wrapper that transparently converts `%s` → `?` before executing each query, so SQLite works without any changes to the calling code. When `DATABASE_URL` is set, a psycopg2 connection wrapped in `_PGConn` is returned instead; both wrappers expose the same interface (`cursor()`, `execute()`, `commit()`, `close()`, `rollback()`).
+
+Row results support dict-style access (`row['column']`) in both modes: SQLite uses `row_factory = sqlite3.Row`; PostgreSQL uses `RealDictCursor`.
 
 ### Constants
 
@@ -74,7 +83,7 @@ Owns the database layer. All other files import from here rather than opening `b
 The seed list of ten spending categories used to populate the `categories` table on first run. The live source of truth is the `categories` table; call `get_categories(user_id)` to get the current ordered list.
 
 **`TRACKED_CATEGORIES`**
-Legacy alias for `DEFAULT_CATEGORIES`. Kept so older imports don't break during migration. Do not use in new code.
+Alias for `DEFAULT_CATEGORIES`. Kept for backwards compatibility with any external imports.
 
 ### Database Schema
 
@@ -84,7 +93,7 @@ Legacy alias for `DEFAULT_CATEGORIES`. Kept so older imports don't break during 
 | `transactions` | Core transaction ledger |
 | `payment_splits` | Sub-rows that divide a lump payment across multiple applied dates |
 | `transaction_shares` | Per-person share amounts for a shared transaction |
-| `settlements` | Records when a shared-expense payment is matched against an expense (legacy) |
+| `settlements` | Records when a shared-expense payment is matched against an expense |
 | `categories` | Per-user ordered category name registry |
 | `tags` | Per-user tag name registry |
 | `transaction_tags` | Many-to-many link between transactions and tags |
@@ -92,7 +101,7 @@ Legacy alias for `DEFAULT_CATEGORIES`. Kept so older imports don't break during 
 | `plaid_accounts` | Connected bank accounts (stores Plaid access tokens) |
 | `breakdown_views` | Saved tag+category combinations for the Detailed Breakdowns page |
 
-**User isolation:** all tables except `users` and `transaction_tags` carry a `user_id` column. All queries filter by `user_id`; `init_db()` backfills existing rows to `user_id = 1` on startup.
+**User isolation:** all tables carry a `user_id` column. All queries filter by `user_id`; `init_db()` backfills existing rows to `user_id = 1` on startup.
 
 **Key `transactions` columns:**
 - `amount` — expenses stored as positive; payments/credits stored with original sign
@@ -107,44 +116,63 @@ Legacy alias for `DEFAULT_CATEGORIES`. Kept so older imports don't break during 
 ### Functions
 
 **`get_db_connection()`**
-Opens and returns a connection to `budget.db` with `row_factory = sqlite3.Row` so query results are accessible by column name.
+Returns a wrapped database connection. Uses SQLite locally (no `DATABASE_URL`) or psycopg2 in production (`DATABASE_URL` set). Both return an object with identical interface; all SQL uses `%s` placeholders.
 
 **`init_db()`**
-Called once at app startup. Creates all tables if they don't exist, runs all incremental column migrations (via try/except `ALTER TABLE`), adds `user_id` to all user-scoped tables and backfills existing rows to `user_id = 1`, runs orphan-settlement cleanup, and calls `clean_account_names()`.
+Called once at app startup. Creates all tables with full column definitions (no incremental migrations needed for a fresh database). On SQLite, also runs `ALTER TABLE ... ADD COLUMN` guards for pre-existing databases. Resets orphaned settlements, backfills `user_id = 1` for any unscoped rows, and calls `clean_account_names()`.
+
+PostgreSQL uses `SERIAL PRIMARY KEY`; SQLite uses `INTEGER PRIMARY KEY AUTOINCREMENT`. The correct type is selected automatically at startup.
 
 **`get_categories(user_id=1)`**
-Returns the ordered list of category names for the given user from the `categories` table. This is the live source of truth — use it instead of `TRACKED_CATEGORIES`.
+Returns the ordered list of category names for the given user from the `categories` table.
 
 **`insert_transactions(transactions, user_id=1)`**
-Bulk-inserts a list of transaction tuples from CSV or Plaid processing. Uses `INSERT OR IGNORE` to silently skip duplicate rows (same date/description/amount/card_name). Stamps each row with the given `user_id`. Returns the number of rows actually inserted.
+Inserts a list of transaction tuples from CSV or Plaid processing. Uses `ON CONFLICT DO NOTHING` to silently skip duplicate rows. Returns the number of rows actually inserted.
 
 **`get_monthly_summary()`**
-Returns total spend and transaction count grouped by month. Mostly superseded by `get_detailed_breakdown`.
+Returns total spend and transaction count grouped by month.
 
 **`get_category_breakdown(start_date, end_date)`**
 Returns total spend grouped by user-assigned category, optionally filtered to a date range.
 
 **`get_all_transactions(limit)`**
-Returns the most recent N transactions. Superseded in the API layer by the inline query in `/api/transactions` which also joins tags.
+Returns the most recent N transactions.
 
 **`get_detailed_summary(year, month)`**
-Returns year-to-date and single-month category totals. Legacy helper; the active route uses `get_detailed_breakdown` instead.
+Returns year-to-date and single-month category totals.
 
 **`get_detailed_breakdown(year, month, user_id=1)`**
-The primary data source for the Overview tab tables. Returns three maps — `month_totals`, `year_totals`, and `year_averages` — each keyed by category with both `gross` and `net` values. All queries are scoped to `user_id`.
+The primary data source for the Overview tab tables. Returns three maps — `month_totals`, `year_totals`, and `year_averages` — each keyed by category with both `gross` and `net` values.
 
-- **Gross** — cash you physically paid out: `CASE WHEN payer='Me' THEN amount ELSE 0 END`. Expenses where someone else paid are excluded because that cash hasn't left your account yet.
-- **Net** — your true economic obligation: `CASE WHEN payer='Me' THEN (amount - reimbursement_amount) ELSE reimbursement_amount END`. Includes your share of expenses others paid, excludes the portions others owe you.
+- **Gross** — cash you physically paid out: `CASE WHEN payer='Me' THEN amount ELSE 0 END`
+- **Net** — your true economic obligation: `CASE WHEN payer='Me' THEN (amount - reimbursement_amount) ELSE reimbursement_amount END`
 - All date comparisons use `COALESCE(applied_date, date)` so date-overridden transactions land in the correct bucket.
 
 **`get_overview_history(year, month, view_mode, time_range, user_id=1)`**
-Powers the stacked bar chart. Returns a list of month labels and per-category totals for the requested range (1m/3m/6m/1y/5y) ending at the given month. Calls `get_categories(user_id)` and scopes all queries to `user_id`. Applies the same gross/net formula as `get_detailed_breakdown`.
+Powers the stacked bar chart. Returns a list of month labels and per-category totals for the requested range (1m/3m/6m/1y/5y) ending at the given month.
 
 **`clean_account_names()`**
 Normalises `card_name` values from CSV imports (e.g. collapses various Chase name strings to `"Chase"`). Run automatically at startup.
 
 **`migrate_to_unique()`**
 Historical one-time migration that added a `UNIQUE` constraint to the transactions table. No longer called; kept for reference.
+
+</details>
+
+---
+
+<details>
+<summary><strong>migrate_to_postgres.py</strong></summary>
+
+One-time script to copy all data from the local `budget.db` into a PostgreSQL database. Run once after the production database has been provisioned and `init_db()` has created the schema.
+
+```bash
+DATABASE_URL=postgresql://user:pass@host/db python migrate_to_postgres.py
+```
+
+Uses the **External Database URL** from Render (the Internal URL only works from within Render's network). Migrates all tables in foreign-key dependency order, handles the SQLite bytes → PostgreSQL string conversion for `password_hash`, then resets all SERIAL sequences so new inserts get correct IDs.
+
+Safe to re-run: uses `ON CONFLICT DO NOTHING` so existing rows are skipped. Prompts for confirmation if the destination already contains transaction data.
 
 </details>
 
@@ -167,10 +195,10 @@ Requests a short-lived Link token from Plaid. The frontend passes this to the Pl
 Exchanges the temporary `public_token` returned by Plaid Link for a permanent `access_token`. Returns `{ access_token, item_id }`.
 
 **`fetch_transactions(access_token, start_date, account_ids)`**
-Pulls all transactions for a connected account from `start_date` through today, handling Plaid's 500-transaction pagination automatically. Returns a list of dicts shaped to match the app's transactions table via `_shape_transaction`.
+Pulls all transactions for a connected account from `start_date` through today, handling Plaid's 500-transaction pagination automatically. Returns a list of dicts shaped to match the app's transactions table via `_shape_transaction`. Includes a `pending` boolean on each transaction; `transactions/get` returns pending transactions by default.
 
 **`_shape_transaction(plaid_txn)`**
-Maps a raw Plaid transaction object to the app's internal dict format. Prefers the newer `personal_finance_category` taxonomy for `bank_category`, falling back to the legacy list. Amounts follow Plaid convention: positive = debit, negative = credit.
+Maps a raw Plaid transaction object to the app's internal dict format. Prefers the newer `personal_finance_category` taxonomy for `bank_category`, falling back to the legacy list. Amounts follow Plaid convention: positive = debit, negative = credit. Sets `pending: True` for unsettled transactions.
 
 </details>
 
@@ -179,7 +207,7 @@ Maps a raw Plaid transaction object to the app's internal dict format. Prefers t
 <details>
 <summary><strong>app.py</strong></summary>
 
-The Flask application. Every URL the frontend calls is defined here. All routes require authentication via a `before_request` guard; unauthenticated requests redirect to `/login`. Helper functions that don't serve a route live at the top of the Plaid section.
+The Flask application. Every URL the frontend calls is defined here. All routes require authentication via a `before_request` guard; unauthenticated requests redirect to `/login`.
 
 ### Helper Functions
 
@@ -187,7 +215,10 @@ The Flask application. Every URL the frontend calls is defined here. All routes 
 Parses a pandas DataFrame from a CSV upload. Auto-detects date, description, amount, and category columns by name. Normalises amounts (expenses stored positive, payments with original sign), detects payments/credits from keywords and category values, deduplicates rows that appear more than once in the same file (appending ` (2)`, ` (3)` etc.), and calls `insert_transactions(final_data, user_id)`. Returns the number of rows inserted.
 
 **`_filter_internal_transfers(candidates)`**
-Splits a Plaid candidate list into `(kept, removed)` based on known internal transfer pairs defined in `TRANSFER_PAIRS` — currently: Venmo "Standard transfer" ↔ Capital One "Venmo", and Capital One "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile". Pairs are matched on equal-and-opposite amounts within a 5-day window. Returns a tuple so the frontend can show both lists.
+Splits a Plaid candidate list into `(kept, removed)` based on known internal transfer pairs — currently: Venmo "Standard transfer" ↔ Capital One "Venmo", and Capital One "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile". Pairs are matched on equal-and-opposite amounts within a 5-day window.
+
+**`_filter_refund_pairs(candidates)`**
+Splits a Plaid candidate list into `(kept, removed)` by detecting purchase/refund pairs: same description, equal-and-opposite amounts, within a 45-day window. Both sides of a matched pair are removed.
 
 ### Routes
 
@@ -222,7 +253,7 @@ Permanently deletes the current user's account and all associated data (transact
 Returns up to N transactions (default 100, configurable via `?limit=`) for the current user, ordered newest-first, with each transaction's tags as a nested list. Includes `applied_date` in the response.
 
 **`GET /api/transaction/<id>/details`**
-Returns a single transaction by ID (scoped to current user), including its `shares` list (from `transaction_shares`), `payment_splits` list, and settlement count. Used to pre-populate the Edit modal.
+Returns a single transaction by ID (scoped to current user), including its `shares` list, `payment_splits` list, and settlement count. Used to pre-populate the Edit modal.
 
 **`POST /api/transaction/manual`**
 Inserts a manually entered transaction for the current user. Accepts `is_payment`, `is_shared`, `payer`, and a `shares` list.
@@ -234,39 +265,38 @@ Deletes a transaction (scoped to current user) and cascades to remove associated
 Flips the `is_shared` boolean on a single transaction (scoped to current user).
 
 **`POST /api/transaction/<id>/toggle-payment`**
-Flips the `is_payment` boolean, moving a transaction between the Expenses and Payments tables (scoped to current user).
+Flips the `is_payment` boolean, moving a transaction between Expenses and Payments (scoped to current user).
 
 **`POST /api/transaction/bulk-edit`**
 Updates one or more fields for a list of transaction IDs in one call (all scoped to current user). Accepted fields:
 - `description` — updates description and merchant
 - `category` — sets category and marks it as manually assigned
 - `applied_date` — sets or clears the date override (key presence triggers update; `null` clears it)
-- `payment_splits` — for single-transaction edits only; replaces all existing splits for that transaction with the provided list of `{ date, amount, note }` objects
+- `payment_splits` — for single-transaction edits only; replaces all existing splits with `{ date, amount, note }` objects
 - `is_shared` / `payer` / `shares` — fully replaces `transaction_shares`, re-links any existing settlements to the new share IDs, and updates `reimbursement_amount`
 
 #### Overview & Summary
 
 **`GET /api/summary`**
-Returns the raw monthly summary from `get_monthly_summary()`.
+Returns the raw monthly summary.
 
 **`GET /api/detailed-summary`**
-Returns month totals, year totals, and year averages for the Overview tab from `get_detailed_breakdown(year, month, current_user.id)`. Accepts `?year=` and `?month=`.
+Returns month totals, year totals, and year averages for the Overview tab. Accepts `?year=` and `?month=`.
 
 **`GET /api/overview-history`**
-Returns stacked bar chart data. Accepts `?year=`, `?month=`, `?view_mode=` (gross/net), and `?time_range=` (1m/3m/6m/1y/5y). Calls `get_overview_history` with `current_user.id`.
+Returns stacked bar chart data. Accepts `?year=`, `?month=`, `?view_mode=` (gross/net), and `?time_range=` (1m/3m/6m/1y/5y).
+
+**`GET /api/account-breakdown`**
+Returns total spending grouped by `card_name` (account) for the selected month. Respects gross/net view mode. Used to populate the Spending by Account panel on the Overview tab.
 
 **`GET /api/sankey-data`**
-Returns income and per-category expense totals for the Sankey (Income Flow) diagram for the current user. Accepts `?year=`, `?month=`, `?view_mode=`, and `?time_range=`.
+Returns income and per-category expense totals for the Sankey (Income Flow) diagram. Accepts `?year=`, `?month=`, `?view_mode=`, and `?time_range=`.
 
 Income calculation:
-- Unsplit payments: `COALESCE(applied_date, date)` used for date bucketing; gross includes shared payments, net excludes them (`AND is_shared = 0`)
+- Unsplit payments: `COALESCE(applied_date, date)` used for date bucketing; gross includes shared payments, net excludes them
 - Split payments: each `payment_splits` row is bucketed by its own `applied_date`
 
-Expense calculation uses the same gross/net formula as `get_detailed_breakdown`:
-- **Gross** — `CASE WHEN payer='Me' THEN amount ELSE 0 END`
-- **Net** — `CASE WHEN payer='Me' THEN (amount - reimbursement_amount) ELSE reimbursement_amount END`
-
-This means gross/net savings differ by exactly the net shared balance still outstanding: `gross_savings − net_savings = shared_income_received − net_fronted_for_others`.
+Expense calculation uses the same gross/net formula as `get_detailed_breakdown`.
 
 #### Categories
 
@@ -288,17 +318,16 @@ Saves a new display order. Body: `{ order: [name, name, ...] }`.
 #### Shared Expenses & Ledger
 
 **`GET /api/shared-ledger`**
-Returns the full shared-expense ledger for the current user. Query params: `?person=` (filter to one person), `?year=`, `?month=`.
+Returns the full shared-expense ledger for the current user. Query params: `?person=`, `?year=`, `?month=`.
 
 Logic:
 1. Fetches all shared transactions where you are the payer or a share recipient
 2. Payments with `payment_splits` are expanded into one row per split (each at its own `applied_date`)
-3. Rows are sorted by effective date ascending
-4. `net_balance` (all-time cumulative) is computed across all rows before any filter is applied
-5. Year/month filter is then applied to produce `display_rows`; those rows get their own running balance starting from 0
-6. Returns `net_balance` (all-time), `month_net` (filtered-period net), and `is_filtered` flag
+3. Rows sorted by effective date ascending; `net_balance` (all-time cumulative) computed before any filter
+4. Year/month filter applied to produce `display_rows` with their own running balance starting from 0
+5. Returns `net_balance` (all-time), `month_net` (filtered-period net), and `is_filtered` flag
 
-Also returns all known people grouped into `owes_me`, `i_owe`, and `settled` for the dropdown, with their all-time balances.
+Also returns all known people grouped into `owes_me`, `i_owe`, and `settled` for the dropdown.
 
 Balance sign convention: positive = others owe you; negative = you owe others.
 
@@ -308,7 +337,7 @@ Returns a deduplicated list of all person names that appear as payers or share r
 #### Tags
 
 **`GET|POST /api/tags`**
-Lists all tags for the current user (GET) or attaches one or more tag names to a list of transaction IDs (POST), creating new tags as needed.
+Lists all tags for the current user (GET), optionally filtered to tags used in a specific category (`?category=`), or attaches a tag to a list of transaction IDs (POST), creating the tag if it doesn't exist.
 
 **`DELETE /api/tag/<id>`**
 Globally deletes a tag (scoped to current user) and removes it from all transactions and tag defaults.
@@ -322,7 +351,7 @@ Gets or sets the default tags for a given category for the current user.
 #### Detailed Breakdowns
 
 **`GET /api/breakdown-report`**
-Returns chart data (monthly totals) and table data (individual transactions) for the selected category, tags, year/month, view mode, and time range. Scoped to current user. Table covers the full time range shown on the graph, not just the selected month.
+Returns chart data (monthly totals) and table data (individual transactions) for the selected category, tags, year/month, view mode, and time range. When `category` is omitted, returns results across all categories and includes a `category` column in the table rows. Scoped to current user.
 
 **`GET|POST /api/breakdown-views`**
 Lists all saved breakdown views for the current user (GET) or creates/updates one by name (POST). Each view stores a name, category, tag ID list, view mode, and time range.
@@ -336,7 +365,7 @@ Deletes a saved breakdown view (scoped to current user).
 Returns a Plaid Link token so the frontend can open the bank-connection popup.
 
 **`POST /api/plaid/exchange-token`**
-Exchanges a temporary public token for a permanent access token and stores the account in `plaid_accounts` with `user_id = current_user.id`.
+Exchanges a temporary public token for a permanent access token and upserts the account in `plaid_accounts` (`ON CONFLICT(item_id) DO UPDATE`).
 
 **`GET /api/plaid/accounts`**
 Returns all connected Plaid accounts for the current user (access tokens not exposed).
@@ -345,16 +374,21 @@ Returns all connected Plaid accounts for the current user (access tokens not exp
 Disconnects a Plaid account (DELETE) or renames its display name (PATCH), scoped to current user.
 
 **`POST /api/plaid/fetch-transactions`**
-Fetches candidate transactions from all of the current user's connected accounts since a given date, deduplicates against already-imported rows (by Plaid transaction ID), and filters out internal transfers via `_filter_internal_transfers`. Returns `{ candidates, filtered_out }`.
+Fetches candidate transactions from all connected accounts since a given date, deduplicates against already-imported rows (by Plaid transaction ID), and filters out internal transfers (`_filter_internal_transfers`) and purchase/refund pairs (`_filter_refund_pairs`). Returns `{ candidates, filtered_out }`.
 
 **`POST /api/plaid/lookup-profiles`**
-Given a list of transaction descriptions, returns the existing category and tag profile for each (scoped to current user): `unique` (all history consistent), `conflict` (history differs), or `none` (never seen). Used during import to auto-apply or prompt for resolution.
+Given a list of transaction descriptions, returns the existing category and tag profile for each: `unique`, `conflict`, or `none`. Used during import to auto-apply or prompt for resolution.
 
 **`POST /api/plaid/lookup-shared-profiles`**
-Given a list of transaction descriptions, returns the most recent shared-expense split profile for each (scoped to current user). Used during import to pre-fill split configuration for recurring shared transactions.
+Given a list of transaction descriptions, returns the most recent shared-expense split profile for each. Used during import to pre-fill split configuration for recurring shared transactions.
 
 **`POST /api/plaid/import-transactions`**
-Inserts selected transactions for the current user. For each: first checks whether an existing CSV-imported row (no Plaid ID) matches on date/description/amount/card_name and backfills the Plaid transaction ID onto it. If no such row exists, inserts a new row via `INSERT OR IGNORE`. If the insert is silently ignored due to the UNIQUE constraint — which happens when Plaid changes a transaction's ID after the fact (e.g. pending → posted) — the existing row is updated to adopt the new Plaid ID so it stops resurfacing as a candidate. Also applies resolved tags and shared split data.
+Inserts selected transactions for the current user. For each transaction:
+1. Checks whether an existing CSV-imported row (no Plaid ID) matches on date/description/amount/card_name and backfills the Plaid ID onto it
+2. If no match, inserts a new row via `INSERT ... ON CONFLICT DO NOTHING`
+3. If the insert is silently ignored (Plaid changed the transaction ID after the fact, e.g. pending → posted), the existing row is updated to adopt the new Plaid ID so it stops resurfacing as a candidate
+
+Also applies resolved tags and shared split data.
 
 </details>
 
@@ -368,9 +402,10 @@ The single HTML page (requires authentication). All tabs, tables, modals, and co
 **Tabs:** Overview · Import · Transactions · Shared Expenses · Detailed Breakdowns
 
 **Overview tab:**
-- Three side-by-side tables: Monthly, Yearly, and Average spending by category
-- Chart panel with two slides (navigated by dots): Monthly Spending Trend (stacked bar) and Income Flow (Sankey diagram)
-- Gross/Net toggle and time-range buttons (1M/3M/6M/1Y/5Y) apply to both the tables and the active chart
+- **Monthly Spending Trend** — stacked bar chart and **Income Flow** — Sankey diagram, switchable via dot navigation
+- **Spending by Account** — bar rows showing spend per card/account for the selected month
+- **Monthly / Yearly / Average toggle** — single table that switches between the three views; Monthly view includes a month-over-month delta badge (↑/↓ %) on each category row
+- Gross/Net toggle and time-range buttons (1M/3M/6M/1Y/5Y) apply globally to charts, tables, and the account breakdown
 
 **Transactions tab:**
 - Expenses table and Payments table with shared filters (text search, category, bank category, account, shared status, tag, year, month)
@@ -383,15 +418,16 @@ The single HTML page (requires authentication). All tabs, tables, modals, and co
 - Transactions with payment splits appear as one row per split at the split's applied date
 
 **Detailed Breakdowns tab:**
-- Category and tag selection with tag defaults and a Saved Views panel
+- Category dropdown with an "All Categories" option (shows cross-category results with a category badge per row)
+- Tag selection with tag defaults and a Saved Views panel; tags shown are scoped to the selected category
 - History chart (line) and transaction table for the selected filters
-- Comparison mode: toggle multiple saved views to overlay them as color-coded lines on the same chart and merge their transaction rows into one color-coded table
+- Comparison mode: toggle multiple saved views to overlay them as color-coded lines on the same chart
 
 **Import tab:**
 - CSV upload with bank name selector
 - Plaid bank connection (connect, rename, disconnect)
-- Candidate transaction table with conflict-resolution and shared-split modals
-- Filtered Out table showing automatically suppressed internal transfers with per-row Restore buttons
+- Candidate transaction table with a **Status** column (Pending / Settled badge); pending rows are greyed out with their checkbox disabled to prevent importing unsettled transactions. Defaults to no rows selected.
+- Filtered Out table showing automatically suppressed internal transfers and refund pairs, with per-row Restore buttons
 
 **Settings modal (gear icon, top-right):**
 
@@ -408,7 +444,7 @@ The single HTML page (requires authentication). All tabs, tables, modals, and co
 - Delete (warns if transactions exist, requires confirmation)
 - Add new category input
 
-**Data island:** Injects the current user's ordered category list as `<script type="application/json">` so `main.js` never needs a separate API call for the category list on initial load.
+**Data island:** Injects the current user's ordered category list as `<script type="application/json">` so `main.js` never needs a separate API call on initial load.
 
 </details>
 
@@ -433,8 +469,11 @@ All client-side logic. Drives every tab, modal, chart, and data fetch.
 - `currentViewMode` — `'gross'` or `'net'` (default `'net'`); controls which expense formula is used across all charts and tables
 - `overviewChartRange` — active time range for the Overview chart (`'1m'` / `'3m'` / `'6m'` / `'1y'` / `'5y'`)
 - `overviewSlide` — 0 = bar chart, 1 = Sankey
+- `_overviewTableMode` — `'monthly'` / `'yearly'` / `'average'`; which Overview table is currently shown
+- `_overviewTableData` — cached `{ month_totals, year_totals, year_averages }` from the last `/api/detailed-summary` call
+- `_overviewHistory` — cached result from the last `/api/overview-history` call; used to compute month-over-month deltas
 - `allTransactions` — cached full transaction list used for client-side filtering
-- `TRACKED_CATEGORIES` — parsed from the page's JSON data island; updated in-place after every category mutation so the frontend and backend stay in sync without a page reload
+- `TRACKED_CATEGORIES` — parsed from the page's JSON data island; updated in-place after every category mutation
 
 ### Initialisation
 
@@ -496,16 +535,25 @@ CRUD operations on `/api/categories`; each refreshes the category list and updat
 ### Overview Tab
 
 **`loadSummary()`**
-Fetches detailed breakdown data and drives `updateOverviewTable` and `renderPieChart` for Monthly, Yearly, and Average sections, then triggers the active chart.
+Fetches `/api/detailed-summary`, stores results in `_overviewTableData`, calls `renderActiveOverviewTable()`, then triggers the active chart and `loadAccountBreakdown()`.
+
+**`switchOverviewTable(mode)`**
+Sets `_overviewTableMode` to `'monthly'`, `'yearly'`, or `'average'`, updates the toggle button styles, and calls `renderActiveOverviewTable()`.
+
+**`renderActiveOverviewTable()`**
+Reads `_overviewTableMode` and renders the appropriate data from `_overviewTableData` into the single Overview table.
 
 **`updateOverviewTable(tableId, dataMap)`**
-Renders a category-by-amount table using the current gross/net view mode.
+Renders a category-by-amount table using the current gross/net view mode. In monthly mode, appends a month-over-month delta badge (↑/↓ %) for each category row using `_overviewHistory` if available.
 
-**`renderPieChart(divId, dataMap)`**
-Renders a Plotly donut chart for a category totals map.
+**`loadOverviewInsights()`**
+Fetches `/api/overview-history`, stores the result in `_overviewHistory`, and computes contextual insight panels (trend, year-over-year, typical spend) for each of the three table modes.
+
+**`loadAccountBreakdown()`**
+Fetches `/api/account-breakdown` and renders per-account spending bars into the Spending by Account panel.
 
 **`setOverviewSlide(index)`**
-Switches the Overview chart panel between the bar chart (slide 0) and Sankey (slide 1) and loads the appropriate chart.
+Switches the Overview chart panel between the bar chart (slide 0) and Sankey (slide 1).
 
 **`loadCurrentOverviewChart()`**
 Calls `loadOverviewHistoryChart()` or `loadSankeyChart()` depending on the active slide.
@@ -514,16 +562,13 @@ Calls `loadOverviewHistoryChart()` or `loadSankeyChart()` depending on the activ
 Fetches monthly category data and renders a Plotly stacked bar chart with per-month total labels and a dashed average line.
 
 **`loadSankeyChart()`**
-Fetches income and expense data and renders a Plotly Sankey (flow) diagram showing income sources → expense categories → savings.
+Fetches income and expense data and renders a Plotly Sankey diagram. Uses `arrangement: 'fixed'` with manual node coordinates to pin Savings at the bottom-right, separated from expense categories.
 
 **`setOverviewChartRange(event, range)`**
 Updates the active time-range button and reloads the current Overview chart.
 
 **`setViewMode(mode)`**
-Switches `currentViewMode` between gross and net and refreshes the Overview tab.
-
-**`loadOverviewInsights()`**
-Computes and renders contextual insight panels beside the Overview tables: recent trend, year-over-year comparison, and typical monthly spend.
+Switches `currentViewMode` between gross and net and refreshes the Overview tab including the account breakdown.
 
 ### Transactions Tab
 
@@ -531,7 +576,7 @@ Computes and renders contextual insight panels beside the Overview tables: recen
 Fetches all transactions (up to 1,000), caches them in `allTransactions`, rebuilds filter dropdowns, and calls `filterTransactions`.
 
 **`filterTransactions()`**
-Applies all active filters (search, category, bank category, account, shared status, tag, year, month) client-side and passes results to `renderFilteredTable`. Computes and shows expense/payment totals when any filter is active.
+Applies all active filters client-side and passes results to `renderFilteredTable`. Computes and shows expense/payment totals when any filter is active.
 
 **`renderFilteredTable(data)`**
 Splits filtered transactions into expenses and payments and renders each into its respective table with checkboxes, tags, shared indicators, and an orange applied-date badge when `applied_date` is set.
@@ -552,7 +597,7 @@ Moves all checked transactions between Expenses and Payments.
 Checks or unchecks all rows in the Expenses or Payments table.
 
 **`openEditModal()` / `closeEditModal()` / `submitEdit()`**
-Opens the Edit modal, pre-populating it when exactly one transaction is selected. For single-transaction edits includes applied date and payment splits fields. Submits via `/api/transaction/bulk-edit`.
+Opens the Edit modal, pre-populating it when exactly one transaction is selected. For single-transaction edits includes applied date and payment splits fields. Submits via `/api/transaction/bulk-edit`. Stores the current transaction amount in `_currentEditAmount` so the payment amount field pre-fills correctly when switching to Shared mode.
 
 **`openAddModal()` / `closeAddModal()` / `submitAdd()`**
 Opens the Add Transaction modal and submits to `/api/transaction/manual`.
@@ -561,7 +606,7 @@ Opens the Add Transaction modal and submits to `/api/transaction/manual`.
 Shows or hides the payer and share rows in the Edit and Add modals.
 
 **`updateSharedSentence(prefix)`**
-Updates the "who paid / who owes" label and shows/hides the split-row container and "Add Person" button based on the current payer and transaction type.
+Updates the "who paid / who owes" label and shows/hides the split-row container based on the current payer and transaction type. Pre-fills the payment amount from `_currentEditAmount` if the field is empty.
 
 **`addShareRow(containerId, name, amount)`**
 Appends a person + amount row to the split container in the Edit or Add modal.
@@ -578,7 +623,7 @@ Rebuilds payer and category dropdowns inside the Edit modal for the appropriate 
 ### Shared Ledger Tab
 
 **`loadSharedLedger()`**
-Fetches the shared ledger with optional person/year/month filters and renders the unified transaction list and running balance. Rebuilds the person dropdown grouped by Owes You / You Owe / Settled Up. When a year/month filter is active, shows the period net in the filter bar.
+Fetches the shared ledger with optional person/year/month filters and renders the unified transaction list and running balance. When a year/month filter is active, shows the period net in the filter bar.
 
 **`clearSharedFilters()`**
 Resets year and month selects to "All" and reloads the ledger.
@@ -609,7 +654,7 @@ Removes a single tag from a single transaction via the inline × button.
 ### Detailed Breakdowns Tab
 
 **`loadBreakdownView()`**
-Initialises year/month dropdowns, rebuilds the tag checklist, clears comparison selection, loads tag defaults, and fetches saved views.
+Initialises year/month dropdowns, rebuilds the tag checklist (scoped to the selected category), clears comparison selection, loads tag defaults, and fetches saved views.
 
 **`loadBreakdownData()`**
 Fetches chart and table data for the current filters. Delegates to `loadComparisonData()` when comparison views are active.
@@ -629,13 +674,13 @@ Unchecks all tag checkboxes and reloads.
 ### Saved Views & Comparison Mode
 
 **`loadSavedViews()`**
-Fetches all saved views, stores them in `_savedBreakdownViews`, and calls `renderSavedViews`.
+Fetches all saved views and calls `renderSavedViews`.
 
 **`renderSavedViews()`**
-Filters to the current category and renders each view as a clickable row. Active comparison views are shown with a color dot and border.
+Filters to the current category and renders each view as a clickable row. Active comparison views shown with a color dot and border.
 
 **`toggleComparisonView(viewId)`**
-Adds or removes a view from the `activeComparisonViews` map, assigning a color from `COMPARISON_COLORS`. Re-renders the panel and reloads data.
+Adds or removes a view from the `activeComparisonViews` map, assigning a color from `COMPARISON_COLORS`.
 
 **`saveCurrentBreakdownView()`**
 Prompts for a name and saves the current category and tag selection to `/api/breakdown-views`. Overwrites any existing view with the same name.
@@ -644,10 +689,10 @@ Prompts for a name and saves the current category and tag selection to `/api/bre
 Removes a view from the comparison set, deletes it from the database, and refreshes the panel.
 
 **`loadComparisonData()`**
-Fetches breakdown data for all active comparison views in parallel (using current year/month, view mode, and time range), then calls `renderComparisonChart` and `renderComparisonTable`.
+Fetches breakdown data for all active comparison views in parallel, then calls `renderComparisonChart` and `renderComparisonTable`.
 
 **`renderComparisonChart(results)`**
-Plots one colored Plotly line trace per active view. When exactly one view is active, adds a dashed average line.
+Plots one colored Plotly line trace per active view.
 
 **`renderComparisonTable(results)`**
 Merges all transactions from active views, sorts by date descending, groups by month, and renders each row with a left-border color matching its chart line.
@@ -670,10 +715,10 @@ PATCH or DELETE a connected account.
 Fetches candidates from `/api/plaid/fetch-transactions`, stores them in `plaidCandidates` and `plaidFilteredOut`, then renders both tables.
 
 **`renderPlaidCandidates()`**
-Renders the candidate transaction table with pre-checked checkboxes and color-coded amounts. Always calls `renderFilteredOutTable()` at the end.
+Renders the candidate transaction table. Pending transactions are shown with a "Pending" badge, greyed out, and their checkbox disabled. All checkboxes default to unchecked.
 
 **`plaidSelectAll(checked)`**
-Checks or unchecks all candidate checkboxes.
+Checks or unchecks all non-disabled candidate checkboxes.
 
 **`moveToFiltered()`**
 Moves all checked candidate rows into `plaidFilteredOut` and re-renders both tables.
@@ -689,7 +734,7 @@ Full import flow for checked candidates:
 1. Looks up existing category/tag profiles per unique description
 2. Looks up existing shared-split profiles per unique description
 3. Shows conflict-resolution modal for descriptions with inconsistent history
-4. Shows split-configuration modal for descriptions with a prior shared history
+4. Shows split-configuration modal for descriptions with prior shared history
 5. Enriches each transaction and posts the batch to `/api/plaid/import-transactions`
 
 **`showSharedSplitModal(description, amount, profile)` / `resolveSharedSplit(apply)` / `addSplitPersonRow(name, amount)`**
@@ -704,20 +749,29 @@ Manages the category-conflict modal. Presents options as radio buttons and resol
 
 ## Environment Variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root for local development:
 
 ```
 PLAID_CLIENT_ID=your_client_id
 PLAID_SECRET=your_secret
-PLAID_ENV=sandbox        # or 'production'
+PLAID_ENV=sandbox        # or 'production' once Plaid approves your app
 SECRET_KEY=a_long_random_string
+# DATABASE_URL is not set locally — the app uses SQLite (budget.db) automatically
 ```
 
-`SECRET_KEY` is required for stable Flask sessions across restarts. Generate one with:
+In production (Render), set these as environment variables in the dashboard:
 
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
 ```
+SECRET_KEY=...           # generate: python -c "import secrets; print(secrets.token_hex(32))"
+DATABASE_URL=...         # auto-provided by Render when you link a PostgreSQL database
+PLAID_CLIENT_ID=...
+PLAID_SECRET=...
+PLAID_ENV=sandbox        # change to 'production' after Plaid approves your application
+```
+
+When `DATABASE_URL` is set, the app uses PostgreSQL. When it is not set, the app uses SQLite. No code changes required between environments.
+
+---
 
 ## Running Locally
 
@@ -726,7 +780,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The app starts on `http://0.0.0.0:5000`. On first run `init_db()` creates `budget.db` automatically.
+The app starts on `http://localhost:5000`. On first run `init_db()` creates `budget.db` automatically.
 
 ### Adding Users
 
@@ -736,4 +790,25 @@ There is no self-registration. Create accounts with the CLI script:
 python create_user.py
 ```
 
-You will be prompted for an email and password. Run once per user you want to invite.
+Prompts for email and password. Run once per user you want to invite.
+
+---
+
+## Deployment (Render)
+
+1. **Push to GitHub** — make sure `.env` is in `.gitignore` (it already is)
+2. **Create a PostgreSQL database** on Render (New → PostgreSQL). Copy the External and Internal connection URLs.
+3. **Create a Web Service** on Render (New → Web Service). Connect your GitHub repo and set:
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `gunicorn app:app --bind 0.0.0.0:$PORT`
+   - Add environment variables: `SECRET_KEY`, `DATABASE_URL` (Internal URL), `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`
+4. **First deploy** — `init_db()` runs at startup and creates all tables in PostgreSQL automatically.
+5. **Migrate existing data** — from your local machine, run:
+   ```bash
+   DATABASE_URL="<External URL>" python migrate_to_postgres.py
+   ```
+6. **Create users** — use the Shell tab in the Render dashboard to run `python create_user.py` for any new users. Your existing account was migrated in step 5.
+
+### Plaid in production
+
+Plaid sandbox mode shows fake test data. To connect real bank accounts, apply for production access at [dashboard.plaid.com](https://dashboard.plaid.com). Once approved, change `PLAID_ENV` to `production` and update `PLAID_SECRET` to your production secret. Personal-use apps typically support up to 5 live bank connections.
