@@ -1381,7 +1381,7 @@ def _filter_internal_transfers(candidates, imported_venmo_transfers=None):
     ] + (imported_venmo_transfers or [])
     for tc in cap_one_app_transfers:
         for tv in venmo_account_transfers:
-            if abs(tc['amount'] - tv['amount']) < 0.01:
+            if abs(tc['amount'] - float(tv['amount'])) < 0.01:
                 date_c = date_type.fromisoformat(tc['date'])
                 date_v = date_type.fromisoformat(tv['date'])
                 if abs((date_c - date_v).days) <= 3:
