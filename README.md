@@ -22,6 +22,7 @@ spending-tracker/
 ├── static/css/style.css      # Dark-theme stylesheet
 ├── templates/index.html      # Single-page HTML shell (authenticated)
 ├── templates/login.html      # Login page
+├── .python-version           # Pins Python 3.11.9 for Render (avoids pandas/numpy incompatibility on 3.14)
 └── budget.db                 # SQLite database (auto-created on first run; local dev only)
 ```
 
@@ -77,6 +78,8 @@ All SQL is written with `%s` placeholders (PostgreSQL style). When `DATABASE_URL
 
 Row results support dict-style access (`row['column']`) in both modes: SQLite uses `row_factory = sqlite3.Row`; PostgreSQL uses `RealDictCursor`.
 
+`_PGConn` also registers a psycopg2 type adapter on every new connection so that `DATE` columns are returned as `"YYYY-MM-DD"` strings instead of Python `datetime.date` objects, matching SQLite's behaviour and avoiding type errors in any Python code that calls string methods on date values.
+
 ### Constants
 
 **`DEFAULT_CATEGORIES`**
@@ -101,7 +104,7 @@ Alias for `DEFAULT_CATEGORIES`. Kept for backwards compatibility with any extern
 | `plaid_accounts` | Connected bank accounts (stores Plaid access tokens) |
 | `breakdown_views` | Saved tag+category combinations for the Detailed Breakdowns page |
 
-**User isolation:** all tables carry a `user_id` column. All queries filter by `user_id`; `init_db()` backfills existing rows to `user_id = 1` on startup.
+**User isolation:** all tables except `settlements`, `payment_splits`, and `transaction_tags` carry a `user_id` column. Those three tables are scoped indirectly via their parent transaction's `user_id`. All queries filter by `user_id`; `init_db()` backfills existing rows to `user_id = 1` on startup.
 
 **Key `transactions` columns:**
 - `amount` — expenses stored as positive; payments/credits stored with original sign
@@ -208,6 +211,8 @@ Maps a raw Plaid transaction object to the app's internal dict format. Prefers t
 <summary><strong>app.py</strong></summary>
 
 The Flask application. Every URL the frontend calls is defined here. All routes require authentication via a `before_request` guard; unauthenticated requests redirect to `/login`.
+
+A custom JSON provider (`_ISODateProvider`) is registered at startup. It serialises `datetime.date`/`datetime.datetime` values as ISO strings (Flask 3.0 defaults to HTTP date format, which breaks the frontend) and `decimal.Decimal` values as floats (Flask 3.0 defaults to strings, which breaks JavaScript arithmetic). Both cases arise when using PostgreSQL; neither occurs with SQLite since its results are already plain Python types.
 
 ### Helper Functions
 
