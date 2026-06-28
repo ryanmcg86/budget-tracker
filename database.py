@@ -295,6 +295,9 @@ def init_db():
 
     # Indexes
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_transaction_date ON transactions(date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_user_applied ON transactions(user_id, applied_date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_user_payment ON transactions(user_id, is_payment)')
     cursor.execute(
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_plaid_txn_id '
         'ON transactions(plaid_transaction_id) WHERE plaid_transaction_id IS NOT NULL'
@@ -561,6 +564,8 @@ def get_detailed_breakdown(year, month, user_id=1):
 
 def get_overview_history(year, month, view_mode='gross', time_range='1y', user_id=1):
     from dateutil.relativedelta import relativedelta
+    from calendar import monthrange
+    from collections import defaultdict
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -583,33 +588,40 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y', user_i
     else:
         start_date = end_date - relativedelta(months=11)
 
+    start_str = start_date.strftime('%Y-%m-01')
+    last_day  = monthrange(int(year), int(month))[1]
+    end_str   = f'{year}-{int(month):02d}-{last_day}'
+
     categories = get_categories(user_id)
     category_placeholders = ','.join(['%s'] * len(categories))
-    sql = f'''
-        SELECT category, SUM({amount_sql_case}) as total FROM transactions
-        WHERE SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 4) = %s
-          AND SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 6, 2) = %s
+
+    cursor.execute(f'''
+        SELECT SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 7) as month_key,
+               category,
+               SUM({amount_sql_case}) as total
+        FROM transactions
+        WHERE COALESCE(applied_date, CAST(date AS TEXT)) >= %s
+          AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
           AND is_payment = 0 AND user_id = %s AND category IN ({category_placeholders})
-        GROUP BY category
-    '''
+        GROUP BY month_key, category
+    ''', (start_str, end_str, user_id, *categories))
 
-    months  = []
-    series  = {cat: [] for cat in categories}
-    current_date = start_date
-
-    while current_date <= end_date:
-        yr, mo = current_date.strftime('%Y'), current_date.strftime('%m')
-        months.append(current_date.strftime('%b %Y'))
-
-        cursor.execute(sql, (yr, mo, user_id, *categories))
-        month_totals = {row['category']: row['total'] or 0 for row in cursor.fetchall()}
-
-        for cat in categories:
-            series[cat].append(month_totals.get(cat, 0))
-
-        current_date += relativedelta(months=1)
+    month_cat = defaultdict(lambda: defaultdict(float))
+    for row in cursor.fetchall():
+        month_cat[row['month_key']][row['category']] = float(row['total'] or 0)
 
     conn.close()
+
+    months = []
+    series = {cat: [] for cat in categories}
+    current_date = start_date
+    while current_date <= end_date:
+        month_key = current_date.strftime('%Y-%m')
+        months.append(current_date.strftime('%b %Y'))
+        for cat in categories:
+            series[cat].append(month_cat[month_key].get(cat, 0))
+        current_date += relativedelta(months=1)
+
     return {'months': months, 'categories': series}
 
 
