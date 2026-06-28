@@ -2,6 +2,7 @@ Flask==3.0.0
 flask-login
 bcrypt
 pandas==2.0.3
+numpy<2.0
 plotly==5.18.0
 python-dotenv
 plaid-python
