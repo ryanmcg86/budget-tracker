@@ -195,7 +195,7 @@ function updateBreakdownMonthDropdown() {
 async function loadSummary() {
     const yearSelect = document.getElementById('yearSelect');
     const monthSelect = document.getElementById('monthSelect');
-    
+
     // Safety check: if dropdowns aren't ready, don't fetch
     if (!yearSelect || !monthSelect || !yearSelect.value) return;
 
@@ -203,22 +203,23 @@ async function loadSummary() {
 
     const year = yearSelect.value;
     const month = monthSelect.value;
-    
+
     try {
-        const response = await fetch(`/api/detailed-summary?year=${year}&month=${month}`);
+        // Fire all independent requests simultaneously — charts don't need summary data
+        const [response] = await Promise.all([
+            fetch(`/api/detailed-summary?year=${year}&month=${month}`),
+            loadOverviewInsights(),
+            loadAccountBreakdown(),
+            loadCurrentOverviewChart(),
+        ]);
+
         const data = await response.json();
-
-        const safe = (fn, label) => { try { fn(); } catch (e) { console.error('Overview render failed:', label, e); } };
-
         _overviewTableData = {
             monthly: data.month_totals,
             yearly:  data.year_totals,
             average: data.year_averages
         };
-        safe(() => renderActiveOverviewTable(), 'overviewTable');
-        safe(() => loadOverviewInsights(), 'overviewInsights');
-        safe(() => loadAccountBreakdown(), 'accountBreakdown');
-        safe(() => loadCurrentOverviewChart(), 'overviewHistory');
+        try { renderActiveOverviewTable(); } catch (e) { console.error('Overview render failed: overviewTable', e); }
     } catch (error) {
         console.error('Error loading summary:', error);
     }
