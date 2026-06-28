@@ -410,12 +410,12 @@ def get_monthly_summary():
     cursor = conn.cursor()
     cursor.execute('''
         SELECT
-            SUBSTR(date, 1, 7) as month,
+            SUBSTR(CAST(date AS TEXT),1, 7) as month,
             COUNT(*) as transaction_count,
             SUM(amount) as total_spent,
             AVG(amount) as avg_transaction
         FROM transactions
-        GROUP BY SUBSTR(date, 1, 7)
+        GROUP BY SUBSTR(CAST(date AS TEXT),1, 7)
         ORDER BY month DESC
     ''')
     results = cursor.fetchall()
@@ -468,13 +468,13 @@ def get_detailed_summary(year, month=None):
     year_query = '''
         SELECT category, SUM(amount) as total, AVG(amount) as average
         FROM transactions
-        WHERE SUBSTR(date, 1, 4) = %s
+        WHERE SUBSTR(CAST(date AS TEXT),1, 4) = %s
         GROUP BY category
     '''
     month_query = '''
         SELECT category, SUM(amount) as total
         FROM transactions
-        WHERE SUBSTR(date, 1, 4) = %s AND SUBSTR(date, 6, 2) = %s
+        WHERE SUBSTR(CAST(date AS TEXT),1, 4) = %s AND SUBSTR(CAST(date AS TEXT),6, 2) = %s
         GROUP BY category
     '''
 
@@ -506,11 +506,11 @@ def get_detailed_breakdown(year, month, user_id=1):
                         ELSE COALESCE(reimbursement_amount, 0)
                    END) as net
             FROM transactions
-            WHERE SUBSTR(COALESCE(applied_date, date), 1, 4) = %s AND is_payment = 0 AND user_id = %s
+            WHERE SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 4) = %s AND is_payment = 0 AND user_id = %s
         '''
         params = [yr, user_id]
         if mo:
-            sql += ' AND SUBSTR(COALESCE(applied_date, date), 6, 2) = %s'
+            sql += ' AND SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 6, 2) = %s'
             params.append(mo)
         sql += ' GROUP BY category'
         cursor.execute(sql, params)
@@ -521,9 +521,9 @@ def get_detailed_breakdown(year, month, user_id=1):
     year_totals  = fetch_data(year)
 
     cursor.execute(
-        'SELECT COUNT(DISTINCT SUBSTR(COALESCE(applied_date, date), 1, 7)) as cnt '
+        'SELECT COUNT(DISTINCT SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 7)) as cnt '
         'FROM transactions '
-        'WHERE SUBSTR(COALESCE(applied_date, date), 1, 4) = %s AND is_payment = 0 AND user_id = %s',
+        'WHERE SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 4) = %s AND is_payment = 0 AND user_id = %s',
         (year, user_id)
     )
     months_in_year = cursor.fetchone()['cnt'] or 1
@@ -539,7 +539,7 @@ def get_detailed_breakdown(year, month, user_id=1):
                     ELSE COALESCE(reimbursement_amount, 0)
                END) / %s as net_avg
         FROM transactions
-        WHERE SUBSTR(COALESCE(applied_date, date), 1, 4) = %s AND is_payment = 0 AND user_id = %s
+        WHERE SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 4) = %s AND is_payment = 0 AND user_id = %s
         GROUP BY category
     ''', (months_in_year, months_in_year, year, user_id))
     year_averages = {row['category']: {'gross': row['gross_avg'] or 0, 'net': row['net_avg'] or 0}
@@ -581,8 +581,8 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y', user_i
     category_placeholders = ','.join(['%s'] * len(categories))
     sql = f'''
         SELECT category, SUM({amount_sql_case}) as total FROM transactions
-        WHERE SUBSTR(COALESCE(applied_date, date), 1, 4) = %s
-          AND SUBSTR(COALESCE(applied_date, date), 6, 2) = %s
+        WHERE SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 4) = %s
+          AND SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 6, 2) = %s
           AND is_payment = 0 AND user_id = %s AND category IN ({category_placeholders})
         GROUP BY category
     '''

@@ -249,8 +249,8 @@ def account_breakdown():
         SELECT card_name, SUM({amount_case}) as total
         FROM transactions
         WHERE user_id = %s AND is_payment = 0
-          AND SUBSTR(COALESCE(applied_date, date), 1, 4) = %s
-          AND SUBSTR(COALESCE(applied_date, date), 6, 2) = %s
+          AND SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 4) = %s
+          AND SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 6, 2) = %s
         GROUP BY card_name
         ORDER BY total DESC
     ''', (current_user.id, year, month))
@@ -324,7 +324,7 @@ def sankey_data():
         SELECT category, SUM({amount_case}) as total
         FROM transactions
         WHERE is_payment = 0 AND user_id = %s
-          AND COALESCE(applied_date, date) >= %s AND COALESCE(applied_date, date) <= %s
+          AND COALESCE(applied_date, CAST(date AS TEXT)) >= %s AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
           AND category IN ({placeholders})
         GROUP BY category
         HAVING total > 0
@@ -336,7 +336,7 @@ def sankey_data():
         SELECT COALESCE(SUM({amount_case}), 0) as total
         FROM transactions
         WHERE is_payment = 0 AND user_id = %s
-          AND COALESCE(applied_date, date) >= %s AND COALESCE(applied_date, date) <= %s
+          AND COALESCE(applied_date, CAST(date AS TEXT)) >= %s AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
           AND (category IS NULL OR category = '' OR category NOT IN ({placeholders}))
     ''', (current_user.id, start_str, end_str, *TRACKED_CATEGORIES))
     uncategorized = round(cur.fetchone()['total'], 2)
@@ -344,9 +344,9 @@ def sankey_data():
         categories.append({'name': 'Uncategorized', 'total': uncategorized})
 
     cur.execute('''
-        SELECT COUNT(DISTINCT SUBSTR(COALESCE(applied_date, date), 1, 7)) as cnt
+        SELECT COUNT(DISTINCT SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 7)) as cnt
         FROM transactions
-        WHERE user_id = %s AND COALESCE(applied_date, date) >= %s AND COALESCE(applied_date, date) <= %s
+        WHERE user_id = %s AND COALESCE(applied_date, CAST(date AS TEXT)) >= %s AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
     ''', (current_user.id, start_str, end_str))
     months_in_range = max(1, cur.fetchone()['cnt'])
 
@@ -728,7 +728,7 @@ def api_account_export():
                reimbursement_amount, is_payment, is_shared, applied_date
         FROM transactions
         WHERE user_id = %s
-        ORDER BY COALESCE(applied_date, date) DESC
+        ORDER BY COALESCE(applied_date, CAST(date AS TEXT)) DESC
     ''', (current_user.id,)).fetchall()
     conn.close()
     buf = io.StringIO()
