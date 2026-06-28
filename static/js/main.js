@@ -1301,13 +1301,15 @@ async function openTagModal() {
     document.getElementById('tagModal').style.display = 'block';
 }
 
+function _escJs(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
 function renderExistingTags(tags) {
     const container = document.getElementById('existingTagsContainer');
     container.innerHTML = tags.map(t => `
         <div id="tag-pill-${t.id}" style="display:inline-flex; align-items:center; margin:4px; background:#f8f9fa; border:1px solid #ddd; border-radius:4px; padding:4px 8px; font-size:0.85em; cursor:pointer;"
-             onclick="toggleStagedTag('${t.name}', ${t.id})">
+             onclick="toggleStagedTag('${_escJs(t.name)}', ${t.id})">
             <span style="font-weight:600; color:#333; margin-right:8px;">${t.name}</span>
-            <button type="button" onclick="event.stopPropagation(); deleteTagGlobal(${t.id}, '${t.name}')" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-weight:bold; font-size:1.1em; line-height:1; padding:0 2px;">×</button>
+            <button type="button" onclick="event.stopPropagation(); deleteTagGlobal(${t.id}, '${_escJs(t.name)}')" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-weight:bold; font-size:1.1em; line-height:1; padding:0 2px;">×</button>
         </div>
     `).join('');
 }
@@ -1344,7 +1346,7 @@ function renderStagedTags() {
     container.innerHTML = Array.from(stagedTags).map(name => `
         <span style="display:inline-flex; align-items:center; background:#e0d0f5; border:1px solid #8e44ad; border-radius:4px; padding:3px 8px; font-size:0.85em; font-weight:600; color:#6c2a8a;">
             ${name}
-            <button type="button" onclick="removeStagedTag('${name}')" style="background:none; border:none; color:#8e44ad; cursor:pointer; font-weight:bold; font-size:1.1em; line-height:1; padding:0 0 0 6px;">×</button>
+            <button type="button" onclick="removeStagedTag('${_escJs(name)}')" style="background:none; border:none; color:#8e44ad; cursor:pointer; font-weight:bold; font-size:1.1em; line-height:1; padding:0 0 0 6px;">×</button>
         </span>
     `).join('');
 }
