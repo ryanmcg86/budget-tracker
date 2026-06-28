@@ -1,7 +1,9 @@
 from flask import Flask, render_template, request, jsonify
 from flask_login import login_required, current_user
+from flask.json.provider import DefaultJSONProvider
 import pandas as pd
 import os
+import datetime as _dt
 from datetime import datetime
 from dotenv import load_dotenv
 from database import init_db, insert_transactions, get_monthly_summary
@@ -9,7 +11,16 @@ from auth import auth_bp, login_manager
 
 load_dotenv()
 
+class _ISODateProvider(DefaultJSONProvider):
+    @staticmethod
+    def default(o):
+        if isinstance(o, (_dt.date, _dt.datetime)):
+            return o.isoformat()
+        return DefaultJSONProvider.default(o)
+
 app = Flask(__name__)
+app.json_provider_class = _ISODateProvider
+app.json = _ISODateProvider(app)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24))
