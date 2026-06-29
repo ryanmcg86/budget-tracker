@@ -299,6 +299,7 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_user_applied ON transactions(user_id, applied_date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_user_payment ON transactions(user_id, is_payment)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_payment_splits_txn ON payment_splits(transaction_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_transaction_shares_txn ON transaction_shares(transaction_id)')
     cursor.execute(
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_plaid_txn_id '
         'ON transactions(plaid_transaction_id) WHERE plaid_transaction_id IS NOT NULL'

@@ -2156,6 +2156,14 @@ function clearSharedFilters() {
     loadSharedLedger();
 }
 
+let _sharedLedgerPromise = null; // { key, promise } — deduplicates prefetch and on-demand fetch
+
+function _prefetchSharedLedger() {
+    const key = 'person=&year=&month=';
+    if (_sharedLedgerPromise && _sharedLedgerPromise.key === key) return;
+    _sharedLedgerPromise = { key, promise: fetch(`/api/shared-ledger?${key}`).then(r => r.json()) };
+}
+
 async function loadSharedLedger() {
     // Populate year dropdown once (idempotent)
     const yearSel = document.getElementById('sharedYearFilter');
@@ -2172,9 +2180,12 @@ async function loadSharedLedger() {
         const person = document.getElementById('sharedPersonFilter').value;
         const year   = document.getElementById('sharedYearFilter').value;
         const month  = document.getElementById('sharedMonthFilter').value;
-        const params = new URLSearchParams({ person, year, month });
-        const response = await fetch(`/api/shared-ledger?${params}`);
-        const data = await response.json();
+        const key    = new URLSearchParams({ person, year, month }).toString();
+
+        if (!_sharedLedgerPromise || _sharedLedgerPromise.key !== key) {
+            _sharedLedgerPromise = { key, promise: fetch(`/api/shared-ledger?${key}`).then(r => r.json()) };
+        }
+        const data = await _sharedLedgerPromise.promise;
 
         // 1. Update Person Dropdown
         const personSelect = document.getElementById('sharedPersonFilter');
@@ -3268,7 +3279,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     // 5. Open the default tab (Overview)
     openTab(null, 'overview');
 
-    // 6. Initialise Plaid (fetches a Link token; sets smart default date window)
+    // 6. Prefetch background data so tabs load instantly on first visit
+    _prefetchSharedLedger();
+
+    // 7. Initialise Plaid (fetches a Link token; sets smart default date window)
     const today = now.toISOString().split('T')[0];
     const dayOfMonth = now.getDate();
     let startDate;

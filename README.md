@@ -126,7 +126,7 @@ Called once at app startup. Creates all tables with full column definitions (no 
 
 PostgreSQL uses `SERIAL PRIMARY KEY`; SQLite uses `INTEGER PRIMARY KEY AUTOINCREMENT`. The correct type is selected automatically at startup.
 
-Creates the following indexes: `idx_transaction_date (date)`, `idx_transactions_user_date (user_id, date)`, `idx_transactions_user_applied (user_id, applied_date)`, `idx_transactions_user_payment (user_id, is_payment)`, `idx_payment_splits_txn (payment_splits.transaction_id)`, and a partial unique index on `plaid_transaction_id`.
+Creates the following indexes: `idx_transaction_date (date)`, `idx_transactions_user_date (user_id, date)`, `idx_transactions_user_applied (user_id, applied_date)`, `idx_transactions_user_payment (user_id, is_payment)`, `idx_payment_splits_txn (payment_splits.transaction_id)`, `idx_transaction_shares_txn (transaction_shares.transaction_id)`, and a partial unique index on `plaid_transaction_id`.
 
 **`get_categories(user_id=1)`**
 Returns the ordered list of category names for the given user from the `categories` table.
@@ -637,8 +637,11 @@ Rebuilds payer and category dropdowns inside the Edit modal for the appropriate 
 
 ### Shared Ledger Tab
 
+**`_prefetchSharedLedger()`**
+Fires the default (no filters) `/api/shared-ledger` request on page load and stores the Promise in `_sharedLedgerPromise`. Mirrors the Sankey prefetch pattern.
+
 **`loadSharedLedger()`**
-Fetches the shared ledger with optional person/year/month filters and renders the unified transaction list and running balance. When a year/month filter is active, shows the period net in the filter bar.
+Fetches the shared ledger with optional person/year/month filters and renders the unified transaction list and running balance. Reuses the in-flight or resolved `_sharedLedgerPromise` when params match the prefetch key. When a year/month filter is active, shows the period net in the filter bar.
 
 **`clearSharedFilters()`**
 Resets year and month selects to "All" and reloads the ledger.
