@@ -126,6 +126,8 @@ Called once at app startup. Creates all tables with full column definitions (no 
 
 PostgreSQL uses `SERIAL PRIMARY KEY`; SQLite uses `INTEGER PRIMARY KEY AUTOINCREMENT`. The correct type is selected automatically at startup.
 
+Creates the following indexes: `idx_transaction_date (date)`, `idx_transactions_user_date (user_id, date)`, `idx_transactions_user_applied (user_id, applied_date)`, `idx_transactions_user_payment (user_id, is_payment)`, and a partial unique index on `plaid_transaction_id`.
+
 **`get_categories(user_id=1)`**
 Returns the ordered list of category names for the given user from the `categories` table.
 
@@ -152,7 +154,7 @@ The primary data source for the Overview tab tables. Returns three maps — `mon
 - All date comparisons use `COALESCE(applied_date, date)` so date-overridden transactions land in the correct bucket.
 
 **`get_overview_history(year, month, view_mode, time_range, user_id=1)`**
-Powers the stacked bar chart. Returns a list of month labels and per-category totals for the requested range (1m/3m/6m/1y/5y) ending at the given month.
+Powers the stacked bar chart. Returns a list of month labels and per-category totals for the requested range (1m/3m/6m/1y/5y) ending at the given month. Executes a single `GROUP BY month_key, category` query and pivots the result in Python — previously fired one query per month in a loop.
 
 **`clean_account_names()`**
 Normalises `card_name` values from CSV imports (e.g. collapses various Chase name strings to `"Chase"`). Run automatically at startup.
@@ -219,8 +221,11 @@ A custom JSON provider (`_ISODateProvider`) is registered at startup. It seriali
 **`process_csv(df, card_name, user_id)`**
 Parses a pandas DataFrame from a CSV upload. Auto-detects date, description, amount, and category columns by name. Normalises amounts (expenses stored positive, payments with original sign), detects payments/credits from keywords and category values, deduplicates rows that appear more than once in the same file (appending ` (2)`, ` (3)` etc.), and calls `insert_transactions(final_data, user_id)`. Returns the number of rows inserted.
 
-**`_filter_internal_transfers(candidates)`**
-Splits a Plaid candidate list into `(kept, removed)` based on known internal transfer pairs — currently: Venmo "Standard transfer" ↔ Capital One "Venmo", and Capital One "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile". Pairs are matched on equal-and-opposite amounts within a 5-day window.
+**`_filter_internal_transfers(candidates, imported_venmo_transfers=None)`**
+Splits a Plaid candidate list into `(kept, removed)` based on two sets of rules:
+
+1. **Symmetric internal transfers** — Venmo "Standard transfer" ↔ Capital One "Venmo", and Capital One "CHASE CREDIT CRD" ↔ Chase "Payment Thank You-Mobile". Both sides are removed when matched on equal-and-opposite amounts within a 5-day window.
+2. **Capital One → Venmo funding transfers** — when a Capital One transaction with `bank_category = "Transfer Out Transfer Out From Apps"` matches a Venmo transaction with `bank_category = "Transfer Out Account Transfer"` by the same amount within 3 days, only the Capital One side is removed (the Venmo payment is the real expense). The Venmo side is looked up in both the new candidates list and the already-imported `imported_venmo_transfers` rows, so the Capital One transaction is suppressed even on subsequent fetches after the Venmo side is already in the database.
 
 **`_filter_refund_pairs(candidates)`**
 Splits a Plaid candidate list into `(kept, removed)` by detecting purchase/refund pairs: same description, equal-and-opposite amounts, within a 45-day window. Both sides of a matched pair are removed.
@@ -264,7 +269,7 @@ Returns a single transaction by ID (scoped to current user), including its `shar
 Inserts a manually entered transaction for the current user. Accepts `is_payment`, `is_shared`, `payer`, and a `shares` list.
 
 **`DELETE /api/transaction/<id>`**
-Deletes a transaction (scoped to current user) and cascades to remove associated `transaction_shares` and `settlements` rows.
+Deletes a transaction (scoped to current user) and cascades to remove associated `transaction_shares`, `transaction_tags`, and `settlements` rows.
 
 **`POST /api/transaction/<id>/toggle-shared`**
 Flips the `is_shared` boolean on a single transaction (scoped to current user).
@@ -382,7 +387,7 @@ Disconnects a Plaid account (DELETE) or renames its display name (PATCH), scoped
 Fetches candidate transactions from all connected accounts since a given date, deduplicates against already-imported rows (by Plaid transaction ID), and filters out internal transfers (`_filter_internal_transfers`) and purchase/refund pairs (`_filter_refund_pairs`). Returns `{ candidates, filtered_out }`.
 
 **`POST /api/plaid/lookup-profiles`**
-Given a list of transaction descriptions, returns the existing category and tag profile for each: `unique`, `conflict`, or `none`. Used during import to auto-apply or prompt for resolution.
+Given a list of transaction descriptions, returns the existing category and tag profile for each: `unique`, `conflict`, or `none`. Used during import to auto-apply or prompt for resolution. Uses `STRING_AGG` (PostgreSQL) to aggregate tag names per transaction.
 
 **`POST /api/plaid/lookup-shared-profiles`**
 Given a list of transaction descriptions, returns the most recent shared-expense split profile for each. Used during import to pre-fill split configuration for recurring shared transactions.
@@ -540,7 +545,7 @@ CRUD operations on `/api/categories`; each refreshes the category list and updat
 ### Overview Tab
 
 **`loadSummary()`**
-Fetches `/api/detailed-summary`, stores results in `_overviewTableData`, calls `renderActiveOverviewTable()`, then triggers the active chart and `loadAccountBreakdown()`.
+Fires `/api/detailed-summary`, `loadOverviewInsights()`, `loadAccountBreakdown()`, and `loadCurrentOverviewChart()` simultaneously via `Promise.all` so all four requests are in-flight at once. Renders the Overview table when `detailed-summary` resolves; charts and panels render independently as their own responses arrive.
 
 **`switchOverviewTable(mode)`**
 Sets `_overviewTableMode` to `'monthly'`, `'yearly'`, or `'average'`, updates the toggle button styles, and calls `renderActiveOverviewTable()`.
@@ -644,8 +649,11 @@ Opens the tag assignment modal for checked transactions, manages the staged tag 
 **`stageNewTag()`**
 Adds a typed tag name to the staged set without submitting.
 
+**`_escJs(s)`**
+Escapes backslashes and single quotes in a string for safe embedding in an inline `onclick` attribute. Applied to all tag names passed to onclick handlers so tags with apostrophes (e.g. "Liar's Bench") don't break the JavaScript string.
+
 **`renderStagedTags()` / `renderExistingTags(tags)`**
-Re-renders staged tag pills and the existing tag grid in the modal.
+Re-renders staged tag pills and the existing tag grid in the modal. Tag names are passed through `_escJs()` before being embedded in onclick attributes.
 
 **`toggleStagedTag(name, id)` / `removeStagedTag(name)`**
 Adds or removes a tag from the staged set.
@@ -816,4 +824,4 @@ Prompts for email and password. Run once per user you want to invite.
 
 ### Plaid in production
 
-Plaid sandbox mode shows fake test data. To connect real bank accounts, apply for production access at [dashboard.plaid.com](https://dashboard.plaid.com). Once approved, change `PLAID_ENV` to `production` and update `PLAID_SECRET` to your production secret. Personal-use apps typically support up to 5 live bank connections.
+Plaid sandbox mode shows fake test data. To connect real bank accounts, apply for production access at [dashboard.plaid.com](https://dashboard.plaid.com). Once approved, change `PLAID_ENV` to `production` and update `PLAID_SECRET` to your production secret in the Render environment variables (`PLAID_CLIENT_ID` stays the same across environments). Personal-use "Pay as you go" production access supports up to 100 free Items (bank connections) per month.
