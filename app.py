@@ -525,30 +525,20 @@ def shared_ledger():
     cursor = conn.cursor()
 
     cursor.execute('''
-        SELECT DISTINCT name FROM (
-            SELECT ts.person_name as name FROM transaction_shares ts
-            JOIN transactions t ON ts.transaction_id = t.id WHERE t.user_id = %s
-            UNION
-            SELECT payer as name FROM transactions WHERE user_id = %s
-        ) q WHERE name != 'Me' AND name IS NOT NULL AND name != '' ORDER BY name
-    ''', (current_user.id, current_user.id))
-    all_people_names = [row['name'] for row in cursor.fetchall()]
-
-    people_with_balances = []
-    for person_name in all_people_names:
-        balance_sql = '''
-            SELECT SUM(CASE WHEN t.payer = 'Me' THEN ts.share_amount ELSE -ts.share_amount END) as balance
-            FROM transactions t
-            JOIN transaction_shares ts ON t.id = ts.transaction_id
-            WHERE t.is_shared = 1 AND t.user_id = %s AND (
-                (t.payer = 'Me' AND ts.person_name = %s) OR
-                (t.payer = %s AND ts.person_name = 'Me')
-            )
-        '''
-        cursor.execute(balance_sql, (current_user.id, person_name, person_name))
-        result = cursor.fetchone()
-        balance = result['balance'] if result and result['balance'] is not None else 0
-        people_with_balances.append({'name': person_name, 'balance': balance})
+        SELECT
+            CASE WHEN t.payer = 'Me' THEN ts.person_name ELSE t.payer END as person_name,
+            SUM(CASE WHEN t.payer = 'Me' THEN ts.share_amount ELSE -ts.share_amount END) as balance
+        FROM transactions t
+        JOIN transaction_shares ts ON t.id = ts.transaction_id
+        WHERE t.is_shared = 1 AND t.user_id = %s
+          AND ((t.payer = 'Me' AND ts.person_name != 'Me') OR (t.payer != 'Me' AND ts.person_name = 'Me'))
+        GROUP BY CASE WHEN t.payer = 'Me' THEN ts.person_name ELSE t.payer END
+        ORDER BY person_name
+    ''', (current_user.id,))
+    people_with_balances = [
+        {'name': row['person_name'], 'balance': float(row['balance'] or 0)}
+        for row in cursor.fetchall()
+    ]
 
     people_data = {
         "owes_me": sorted([p for p in people_with_balances if p['balance'] > 0.01], key=lambda x: x['balance'], reverse=True),
