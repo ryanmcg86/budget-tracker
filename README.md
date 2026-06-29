@@ -154,7 +154,7 @@ The primary data source for the Overview tab tables. Returns three maps — `mon
 - All date comparisons use `COALESCE(applied_date, date)` so date-overridden transactions land in the correct bucket.
 
 **`get_overview_history(year, month, view_mode, time_range, user_id=1)`**
-Powers the stacked bar chart. Returns a list of month labels and per-category totals for the requested range (1m/3m/6m/1y/5y) ending at the given month. Executes a single `GROUP BY month_key, category` query and pivots the result in Python — previously fired one query per month in a loop.
+Powers the stacked bar chart. Returns a list of month labels and per-category totals for the requested range (1m/3m/6m/1y/5y) ending at the given month. Executes a single `GROUP BY month_key, category` query and pivots the result in Python. Categories are queried on the same connection to avoid a second round-trip. The date filter uses a two-branch OR (applied_date IS NOT NULL / date >= %s with a Python date object) so PostgreSQL can use the `(user_id, date)` composite index.
 
 **`clean_account_names()`**
 Normalises `card_name` values from CSV imports (e.g. collapses various Chase name strings to `"Chase"`). Run automatically at startup.

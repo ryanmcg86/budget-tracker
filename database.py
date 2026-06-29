@@ -590,11 +590,16 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y', user_i
     else:
         start_date = end_date - relativedelta(months=11)
 
-    start_str = start_date.strftime('%Y-%m-01')
-    last_day  = monthrange(int(year), int(month))[1]
-    end_str   = f'{year}-{int(month):02d}-{last_day}'
+    start_str      = start_date.strftime('%Y-%m-01')
+    last_day       = monthrange(int(year), int(month))[1]
+    end_str        = f'{year}-{int(month):02d}-{last_day}'
+    # Pass date objects for the date column so PostgreSQL can use the (user_id, date) index
+    start_date_obj = start_date.date()
+    end_date_obj   = end_date.date()
 
-    categories = get_categories(user_id)
+    # Reuse the same connection — avoids a second round-trip that get_categories() would open
+    cursor.execute('SELECT name FROM categories WHERE user_id = %s ORDER BY display_order', (user_id,))
+    categories = [row['name'] for row in cursor.fetchall()] or list(DEFAULT_CATEGORIES)
     category_placeholders = ','.join(['%s'] * len(categories))
 
     cursor.execute(f'''
@@ -602,11 +607,14 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y', user_i
                category,
                SUM({amount_sql_case}) as total
         FROM transactions
-        WHERE COALESCE(applied_date, CAST(date AS TEXT)) >= %s
-          AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
-          AND is_payment = 0 AND user_id = %s AND category IN ({category_placeholders})
+        WHERE is_payment = 0 AND user_id = %s AND category IN ({category_placeholders})
+          AND (
+            (applied_date IS NOT NULL AND applied_date >= %s AND applied_date <= %s)
+            OR
+            (applied_date IS NULL AND date >= %s AND date <= %s)
+          )
         GROUP BY month_key, category
-    ''', (start_str, end_str, user_id, *categories))
+    ''', (user_id, *categories, start_str, end_str, start_date_obj, end_date_obj))
 
     month_cat = defaultdict(lambda: defaultdict(float))
     for row in cursor.fetchall():

@@ -265,8 +265,7 @@ def account_breakdown():
 
 @app.route('/api/sankey-data')
 def sankey_data():
-    from database import get_db_connection, get_categories
-    TRACKED_CATEGORIES = get_categories(current_user.id)
+    from database import get_db_connection, DEFAULT_CATEGORIES
     from dateutil.relativedelta import relativedelta
     from calendar import monthrange
 
@@ -287,12 +286,18 @@ def sankey_data():
     else:
         start_dt = end_dt - relativedelta(months=11)
 
-    start_str = start_dt.strftime('%Y-%m-01')
-    last_day  = monthrange(year, month)[1]
-    end_str   = f'{year}-{month:02d}-{last_day}'
+    start_str      = start_dt.strftime('%Y-%m-01')
+    last_day       = monthrange(year, month)[1]
+    end_str        = f'{year}-{month:02d}-{last_day}'
+    start_date_obj = start_dt.date()
+    end_date_obj   = end_dt.replace(day=last_day).date()
 
     conn = get_db_connection()
     cur  = conn.cursor()
+
+    # Reuse the same connection — avoids a second round-trip that get_categories() would open
+    cur.execute('SELECT name FROM categories WHERE user_id = %s ORDER BY display_order', (current_user.id,))
+    TRACKED_CATEGORIES = [row['name'] for row in cur.fetchall()] or list(DEFAULT_CATEGORIES)
 
     shared_filter = 'AND t.is_shared = 0' if view_mode == 'net' else ''
 
@@ -309,8 +314,11 @@ def sankey_data():
             LEFT JOIN payment_splits ps ON ps.transaction_id = t.id
             WHERE t.is_payment = 1 AND t.user_id = %s {shared_filter}
               AND ps.transaction_id IS NULL
-              AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) >= %s
-              AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) <= %s
+              AND (
+                (t.applied_date IS NOT NULL AND t.applied_date >= %s AND t.applied_date <= %s)
+                OR
+                (t.applied_date IS NULL AND t.date >= %s AND t.date <= %s)
+              )
             UNION ALL
             SELECT ps.amount as income
             FROM payment_splits ps
@@ -318,7 +326,8 @@ def sankey_data():
             WHERE t.is_payment = 1 AND t.user_id = %s {shared_filter}
               AND ps.applied_date >= %s AND ps.applied_date <= %s
         ) sub
-    ''', (current_user.id, start_str, end_str, current_user.id, start_str, end_str))
+    ''', (current_user.id, start_str, end_str, start_date_obj, end_date_obj,
+          current_user.id, start_str, end_str))
     income = float(cur.fetchone()['total'] or 0)
 
     # Query 2: all expense categories in one pass — partition tracked vs untracked in Python
@@ -326,11 +335,14 @@ def sankey_data():
         SELECT category, SUM({amount_case}) as total
         FROM transactions
         WHERE is_payment = 0 AND user_id = %s
-          AND COALESCE(applied_date, CAST(date AS TEXT)) >= %s
-          AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
+          AND (
+            (applied_date IS NOT NULL AND applied_date >= %s AND applied_date <= %s)
+            OR
+            (applied_date IS NULL AND date >= %s AND date <= %s)
+          )
         GROUP BY category
         HAVING SUM({amount_case}) > 0
-    ''', (current_user.id, start_str, end_str))
+    ''', (current_user.id, start_str, end_str, start_date_obj, end_date_obj))
 
     category_set = set(TRACKED_CATEGORIES)
     categories = []
