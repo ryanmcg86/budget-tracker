@@ -199,8 +199,8 @@ Requests a short-lived Link token from Plaid. The frontend passes this to the Pl
 **`exchange_public_token(public_token)`**
 Exchanges the temporary `public_token` returned by Plaid Link for a permanent `access_token`. Returns `{ access_token, item_id }`.
 
-**`fetch_transactions(access_token, start_date, account_ids)`**
-Pulls all transactions for a connected account from `start_date` through today, handling Plaid's 500-transaction pagination automatically. Returns a list of dicts shaped to match the app's transactions table via `_shape_transaction`. Includes a `pending` boolean on each transaction; `transactions/get` returns pending transactions by default.
+**`fetch_transactions(access_token, start_date, account_ids, end_date=None)`**
+Pulls all transactions for a connected account from `start_date` through `end_date` (defaults to today if not provided), handling Plaid's 500-transaction pagination automatically. Returns a list of dicts shaped to match the app's transactions table via `_shape_transaction`. Includes a `pending` boolean on each transaction; `transactions/get` returns pending transactions by default.
 
 **`_shape_transaction(plaid_txn)`**
 Maps a raw Plaid transaction object to the app's internal dict format. Prefers the newer `personal_finance_category` taxonomy for `bank_category`, falling back to the legacy list. Amounts follow Plaid convention: positive = debit, negative = credit. Sets `pending: True` for unsettled transactions.
@@ -384,7 +384,7 @@ Returns all connected Plaid accounts for the current user (access tokens not exp
 Disconnects a Plaid account (DELETE) or renames its display name (PATCH), scoped to current user.
 
 **`POST /api/plaid/fetch-transactions`**
-Fetches candidate transactions from all connected accounts since a given date, deduplicates against already-imported rows (by Plaid transaction ID), and filters out internal transfers (`_filter_internal_transfers`) and purchase/refund pairs (`_filter_refund_pairs`). Returns `{ candidates, filtered_out }`.
+Fetches candidate transactions from all connected accounts within a date window (`since_date` to `end_date`; `end_date` defaults to today if omitted), deduplicates against already-imported rows (by Plaid transaction ID), and filters out internal transfers (`_filter_internal_transfers`) and purchase/refund pairs (`_filter_refund_pairs`). Returns `{ candidates, filtered_out }`.
 
 **`POST /api/plaid/lookup-profiles`**
 Given a list of transaction descriptions, returns the existing category and tag profile for each: `unique`, `conflict`, or `none`. Used during import to auto-apply or prompt for resolution. Uses `STRING_AGG` (PostgreSQL) to aggregate tag names per transaction.
@@ -436,6 +436,7 @@ The single HTML page (requires authentication). All tabs, tables, modals, and co
 **Import tab:**
 - CSV upload with bank name selector
 - Plaid bank connection (connect, rename, disconnect)
+- Date range picker (start + end) for controlling the fetch window. Start defaults to the 1st of the current month, or 30 days ago if today is within the first 15 days of the month. End defaults to today.
 - Candidate transaction table with a **Status** column (Pending / Settled badge); pending rows are greyed out with their checkbox disabled to prevent importing unsettled transactions. Defaults to no rows selected.
 - Filtered Out table showing automatically suppressed internal transfers and refund pairs, with per-row Restore buttons
 

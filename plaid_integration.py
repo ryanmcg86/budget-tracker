@@ -70,9 +70,9 @@ def exchange_public_token(public_token):
     }
 
 
-def fetch_transactions(access_token, start_date: date, account_ids: list = None):
+def fetch_transactions(access_token, start_date: date, account_ids: list = None, end_date: date = None):
     """
-    Pulls transactions for a connected account from start_date through today.
+    Pulls transactions for a connected account from start_date through end_date (defaults to today).
     Returns a list of dicts shaped to match the spending tracker's transactions
     table, ready for the frontend to display as sync candidates.
 
@@ -80,7 +80,8 @@ def fetch_transactions(access_token, start_date: date, account_ids: list = None)
     them all.
     """
     client = _get_client()
-    end_date = date.today()
+    if end_date is None:
+        end_date = date.today()
 
     options = TransactionsGetRequestOptions()
     if account_ids:

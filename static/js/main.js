@@ -2580,8 +2580,11 @@ async function disconnectPlaidAccount(id, name) {
 }
 
 async function fetchPlaidCandidates() {
-    const sinceDate = document.getElementById('plaidSinceDate').value;
-    if (!sinceDate) { alert('Please select a start date.'); return; }
+    const startDate = document.getElementById('plaidStartDate').value;
+    const endDate   = document.getElementById('plaidEndDate').value;
+    if (!startDate) { alert('Please select a start date.'); return; }
+    if (!endDate)   { alert('Please select an end date.'); return; }
+    if (startDate > endDate) { alert('Start date must be on or before end date.'); return; }
 
     const status = document.getElementById('plaidStatusMessage');
     status.textContent = 'Fetching transactions from your banks…';
@@ -2591,7 +2594,7 @@ async function fetchPlaidCandidates() {
         const res = await fetch('/api/plaid/fetch-transactions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ since_date: sinceDate })
+            body: JSON.stringify({ since_date: startDate, end_date: endDate })
         });
         const data = await res.json();
         if (data.error) { status.textContent = 'Error: ' + data.error; return; }
@@ -3252,9 +3255,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     // 5. Open the default tab (Overview)
     openTab(null, 'overview');
 
-    // 6. Initialise Plaid (fetches a Link token; sets a default since-date of today)
+    // 6. Initialise Plaid (fetches a Link token; sets smart default date window)
     const today = now.toISOString().split('T')[0];
-    document.getElementById('plaidSinceDate').value = today;
+    const dayOfMonth = now.getDate();
+    let startDate;
+    if (dayOfMonth <= 15) {
+        const thirtyDaysAgo = new Date(now);
+        thirtyDaysAgo.setDate(now.getDate() - 30);
+        startDate = thirtyDaysAgo.toISOString().split('T')[0];
+    } else {
+        startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    }
+    document.getElementById('plaidStartDate').value = startDate;
+    document.getElementById('plaidEndDate').value = today;
     loadPlaidAccounts();
     initPlaidLink();
 });

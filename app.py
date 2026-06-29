@@ -1427,6 +1427,7 @@ def plaid_fetch_transactions():
 
         data = request.json
         since_date = date_type.fromisoformat(data.get('since_date'))
+        end_date   = date_type.fromisoformat(data.get('end_date')) if data.get('end_date') else date_type.today()
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1452,7 +1453,7 @@ def plaid_fetch_transactions():
 
         candidates = []
         for acct in accounts:
-            txns = fetch_transactions(acct['access_token'], since_date, [acct['account_id']])
+            txns = fetch_transactions(acct['access_token'], since_date, [acct['account_id']], end_date)
             for t in txns:
                 if t['plaid_transaction_id'] not in existing_ids:
                     t['card_name'] = acct['account_name']
