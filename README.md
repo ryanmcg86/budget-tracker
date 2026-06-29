@@ -821,7 +821,7 @@ Prompts for email and password. Run once per user you want to invite.
 2. **Create a PostgreSQL database** on Render (New → PostgreSQL). Copy the External and Internal connection URLs.
 3. **Create a Web Service** on Render (New → Web Service). Connect your GitHub repo and set:
    - Build command: `pip install -r requirements.txt`
-   - Start command: `gunicorn app:app --bind 0.0.0.0:$PORT`
+   - Start command: `gunicorn app:app --bind 0.0.0.0:$PORT --worker-class gthread --threads 4`
    - Add environment variables: `SECRET_KEY`, `DATABASE_URL` (Internal URL), `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`
 4. **First deploy** — `init_db()` runs at startup and creates all tables in PostgreSQL automatically.
 5. **Migrate existing data** — from your local machine, run:

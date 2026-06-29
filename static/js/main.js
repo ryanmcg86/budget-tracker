@@ -206,7 +206,6 @@ async function loadSummary() {
 
     try {
         // Fire all independent requests simultaneously — charts don't need summary data
-        _prefetchSankeyData(); // start Sankey fetch in background so slide 1 is ready immediately
         const [response] = await Promise.all([
             fetch(`/api/detailed-summary?year=${year}&month=${month}`),
             loadOverviewInsights(),
@@ -3279,8 +3278,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     // 5. Open the default tab (Overview)
     openTab(null, 'overview');
 
-    // 6. Prefetch background data so tabs load instantly on first visit
-    _prefetchSharedLedger();
+    // 6. Prefetch background data after a short delay so critical page-load requests go first
+    setTimeout(() => {
+        _prefetchSankeyData();
+        _prefetchSharedLedger();
+    }, 1500);
 
     // 7. Initialise Plaid (fetches a Link token; sets smart default date window)
     const today = now.toISOString().split('T')[0];
