@@ -594,8 +594,9 @@ def get_overview_history(year, month, view_mode='gross', time_range='1y', user_i
     last_day       = monthrange(int(year), int(month))[1]
     end_str        = f'{year}-{int(month):02d}-{last_day}'
     # Pass date objects for the date column so PostgreSQL can use the (user_id, date) index
+    from datetime import date as date_class
     start_date_obj = start_date.date()
-    end_date_obj   = end_date.date()
+    end_date_obj   = date_class(int(year), int(month), last_day)  # end_date is 1st of month, not last day
 
     # Reuse the same connection — avoids a second round-trip that get_categories() would open
     cursor.execute('SELECT name FROM categories WHERE user_id = %s ORDER BY display_order', (user_id,))
