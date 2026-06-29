@@ -192,7 +192,9 @@ function updateBreakdownMonthDropdown() {
 }
 
 // Load monthly summary
-async function loadSummary() {
+async function loadSummary(clearCache = false) {
+    if (clearCache) _apiCache.clear();
+
     const yearSelect = document.getElementById('yearSelect');
     const monthSelect = document.getElementById('monthSelect');
 
@@ -207,6 +209,10 @@ async function loadSummary() {
     try {
         // Phase 1: render the chart the user sees first — give it exclusive server access
         await loadCurrentOverviewChart();
+
+        // Start Sankey prefetch immediately after chart renders — user will read it for a few
+        // seconds before clicking slide 1, giving the prefetch time to resolve
+        _prefetchSankeyData();
 
         // Phase 2: fire everything else in parallel while the user reads the chart
         const [response] = await Promise.all([
@@ -230,7 +236,12 @@ async function loadSummary() {
 let overviewChartRange = '6m'; // Default chart range for the Monthly Spending Trend graph
 let overviewSlide = 0;    // 0 = bar chart, 1 = Sankey
 let sankeyAvgMode = false; // false = Total, true = Avg/mo
-let _sankeyPromise = null; // { key, promise } — deduplicates prefetch and on-demand fetch
+// URL-keyed cache: first request fires a real fetch, repeats (e.g. gross↔net toggles) resolve instantly
+const _apiCache = new Map();
+function _cachedFetch(url) {
+    if (!_apiCache.has(url)) _apiCache.set(url, fetch(url).then(r => r.json()));
+    return _apiCache.get(url);
+}
 let _overviewTableMode = 'monthly';
 let _overviewTableData = {};
 let _overviewInsightData = {};
@@ -330,9 +341,8 @@ function _prefetchSankeyData() {
     const year  = document.getElementById('yearSelect').value;
     const month = document.getElementById('monthSelect').value;
     if (!year || !month) return;
-    const key = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange }).toString();
-    if (_sankeyPromise && _sankeyPromise.key === key) return; // already in-flight or resolved
-    _sankeyPromise = { key, promise: fetch(`/api/sankey-data?${key}`).then(r => r.json()) };
+    const url = `/api/sankey-data?${new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange })}`;
+    _cachedFetch(url); // warms the cache; result reused by loadSankeyChart
 }
 
 async function loadSankeyChart() {
@@ -340,11 +350,8 @@ async function loadSankeyChart() {
     const month = document.getElementById('monthSelect').value;
     if (!year || !month) return;
 
-    const key = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange }).toString();
-    if (!_sankeyPromise || _sankeyPromise.key !== key) {
-        _sankeyPromise = { key, promise: fetch(`/api/sankey-data?${key}`).then(r => r.json()) };
-    }
-    const data = await _sankeyPromise.promise;
+    const url = `/api/sankey-data?${new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange })}`;
+    const data = await _cachedFetch(url);
 
     const divisor = sankeyAvgMode ? (data.months_in_range || 1) : 1;
     const income     = data.income / divisor;
@@ -464,8 +471,7 @@ async function loadOverviewHistoryChart() {
     const params = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange });
 
     try {
-        const response = await fetch(`/api/overview-history?${params.toString()}`);
-        const data = await response.json();
+        const data = await _cachedFetch(`/api/overview-history?${params.toString()}`);
 
         // Same palette used by the pie charts, so a category's color stays consistent across the page
         const colors = ['#34A77B', '#5B9BD5', '#D2A859', '#9B7BD0', '#E0795F', '#4FB6A8', '#D27FB0', '#8FB04F', '#7E8AA0', '#C2596B'];
@@ -680,8 +686,7 @@ async function loadOverviewInsights() {
         const month = monthSelect.value;
         // Pull a wide window so year-over-year stats light up automatically once prior-year data exists.
         const params = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: '5y' });
-        const res = await fetch(`/api/overview-history?${params.toString()}`);
-        const data = await res.json();
+        const data = await _cachedFetch(`/api/overview-history?${params.toString()}`);
         _overviewHistory = data;
         const months = data.months || [];
         const cats = data.categories || {};
@@ -907,9 +912,9 @@ async function deleteTransaction(txnId) {
             // 1. Refresh the master list of transactions from the server
             // This also automatically calls updateBankCategoryDropdown() and filterTransactions()
             await loadFullTransactions();
-            
+
             // 2. Refresh the Overview tables (Monthly/Yearly/Avg) since totals changed
-            loadSummary();
+            loadSummary(true);
         } else {
             alert('Failed to delete transaction from database');
         }
@@ -1019,9 +1024,9 @@ async function saveRule() {
 
     if (response.ok) {
         document.getElementById('ruleKeyword').value = '';
-        document.getElementById('ruleAmount').value = ''; // Clear amount
+        document.getElementById('ruleAmount').value = '';
         //loadRules();
-        loadSummary();
+        loadSummary(true);
         loadFullTransactions();
     }
 }
@@ -1658,7 +1663,7 @@ async function togglePayment(txnId) {
         if (response.ok) {
             // Success! Reload the data
             loadFullTransactions();
-            loadSummary();
+            loadSummary(true);
         } else {
             // This is where your error is currently triggering
             const errorData = await response.json();
@@ -1825,7 +1830,7 @@ async function submitAdd() {
     if (response.ok) {
         closeAddModal();
         await loadFullTransactions();
-        loadSummary();
+        loadSummary(true);
         refreshSavedPeople();
     } else {
         alert("Failed to save transaction.");
@@ -1851,7 +1856,7 @@ async function bulkTogglePayment() {
     }
     
     await loadFullTransactions();
-    loadSummary();
+    loadSummary(true);
 }
 
 // Bulk Delete
@@ -1874,7 +1879,7 @@ async function bulkDelete() {
     }
     
     await loadFullTransactions();
-    loadSummary();
+    loadSummary(true);
 }
 
 async function openEditModal() {
@@ -2054,7 +2059,7 @@ async function submitEdit() {
     if (response.ok) {
         closeEditModal();
         await loadFullTransactions();
-        loadSummary();
+        loadSummary(true);
         refreshSavedPeople();
     }
 }
@@ -2315,7 +2320,7 @@ async function processSettlement() {
     if (response.ok) {
         alert("Settlement recorded successfully!");
         loadSharedLedger();
-        loadSummary();
+        loadSummary(true);
     } else {
         const err = await response.json();
         alert("Error: " + (err.error || "Failed to process settlement"));
@@ -2922,7 +2927,7 @@ async function importSelectedPlaidTransactions() {
     renderPlaidCandidates();
 
     await loadFullTransactions();
-    loadSummary();
+    loadSummary(true);
 }
 
 function resolveConflict(choice) {
@@ -3280,11 +3285,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     // 5. Open the default tab (Overview)
     openTab(null, 'overview');
 
-    // 6. Prefetch background data after a short delay so critical page-load requests go first
-    setTimeout(() => {
-        _prefetchSankeyData();
-        _prefetchSharedLedger();
-    }, 1500);
+    // 6. Prefetch shared ledger after a short delay — less urgently needed than Sankey
+    setTimeout(() => { _prefetchSharedLedger(); }, 2000);
 
     // 7. Initialise Plaid (fetches a Link token; sets smart default date window)
     const today = now.toISOString().split('T')[0];
@@ -3482,7 +3484,7 @@ async function confirmRename(i) {
     });
     if (res.ok) {
         await loadCategories();
-        loadSummary();
+        loadSummary(true);
         loadFullTransactions();
     } else {
         alert('Could not rename category.');
@@ -3515,7 +3517,7 @@ async function deleteCategory(name) {
         await fetch(`/api/categories/${encodeURIComponent(name)}?confirm=1`, { method: 'DELETE' });
     }
     await loadCategories();
-    loadSummary();
+    loadSummary(true);
 }
 
 async function moveCategoryUp(i) {

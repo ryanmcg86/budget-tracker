@@ -637,6 +637,9 @@ Rebuilds payer and category dropdowns inside the Edit modal for the appropriate 
 
 ### Shared Ledger Tab
 
+**`_apiCache`** (Map)
+URL-keyed promise cache. `_cachedFetch(url)` stores the fetch+JSON Promise on first call and returns the same Promise on every repeat, making view-mode toggles and repeated chart renders instant. Cleared via `loadSummary(true)` after any data mutation.
+
 **`_prefetchSharedLedger()`**
 Fires the default (no filters) `/api/shared-ledger` request on page load and stores the Promise in `_sharedLedgerPromise`. Mirrors the Sankey prefetch pattern.
 
