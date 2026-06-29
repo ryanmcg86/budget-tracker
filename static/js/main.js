@@ -228,6 +228,9 @@ async function loadSummary(clearCache = false) {
             average: data.year_averages
         };
         try { renderActiveOverviewTable(); } catch (e) { console.error('Overview render failed: overviewTable', e); }
+
+        // Phase 2 complete — all threads free; prefetch shared ledger while user reads the overview
+        _prefetchSharedLedger();
     } catch (error) {
         console.error('Error loading summary:', error);
     }
@@ -3285,8 +3288,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // 5. Open the default tab (Overview)
     openTab(null, 'overview');
 
-    // 6. Prefetch shared ledger after a short delay — less urgently needed than Sankey
-    setTimeout(() => { _prefetchSharedLedger(); }, 2000);
+    // 6. Shared ledger prefetch is triggered at the end of loadSummary's Phase 2
 
     // 7. Initialise Plaid (fetches a Link token; sets smart default date window)
     const today = now.toISOString().split('T')[0];
