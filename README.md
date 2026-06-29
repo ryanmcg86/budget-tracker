@@ -126,7 +126,7 @@ Called once at app startup. Creates all tables with full column definitions (no 
 
 PostgreSQL uses `SERIAL PRIMARY KEY`; SQLite uses `INTEGER PRIMARY KEY AUTOINCREMENT`. The correct type is selected automatically at startup.
 
-Creates the following indexes: `idx_transaction_date (date)`, `idx_transactions_user_date (user_id, date)`, `idx_transactions_user_applied (user_id, applied_date)`, `idx_transactions_user_payment (user_id, is_payment)`, and a partial unique index on `plaid_transaction_id`.
+Creates the following indexes: `idx_transaction_date (date)`, `idx_transactions_user_date (user_id, date)`, `idx_transactions_user_applied (user_id, applied_date)`, `idx_transactions_user_payment (user_id, is_payment)`, `idx_payment_splits_txn (payment_splits.transaction_id)`, and a partial unique index on `plaid_transaction_id`.
 
 **`get_categories(user_id=1)`**
 Returns the ordered list of category names for the given user from the `categories` table.
@@ -302,9 +302,10 @@ Returns total spending grouped by `card_name` (account) for the selected month. 
 **`GET /api/sankey-data`**
 Returns income and per-category expense totals for the Sankey (Income Flow) diagram. Accepts `?year=`, `?month=`, `?view_mode=`, and `?time_range=`.
 
-Income calculation:
-- Unsplit payments: `COALESCE(applied_date, date)` used for date bucketing; gross includes shared payments, net excludes them
-- Split payments: each `payment_splits` row is bucketed by its own `applied_date`
+Income calculation uses a single UNION ALL query: unsplit payments (via LEFT JOIN anti-join replacing the original correlated NOT EXISTS) combined with payment_splits rows. Expense categories are fetched in one query and partitioned into tracked vs. uncategorized in Python, replacing two separate queries. Total: 3 queries down from 5.
+
+- Unsplit payments: LEFT JOIN on `payment_splits` with NULL check (replaces correlated `NOT EXISTS`)
+- Split payments: each `payment_splits` row bucketed by its own `applied_date`
 
 Expense calculation uses the same gross/net formula as `get_detailed_breakdown`.
 

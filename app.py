@@ -294,59 +294,58 @@ def sankey_data():
     conn = get_db_connection()
     cur  = conn.cursor()
 
-    shared_filter = 'AND is_shared = 0' if view_mode == 'net' else ''
-
-    cur.execute(f'''
-        SELECT COALESCE(SUM(ABS(amount)), 0) as total
-        FROM transactions t
-        WHERE t.is_payment = 1 AND t.user_id = %s {shared_filter}
-          AND NOT EXISTS (SELECT 1 FROM payment_splits WHERE transaction_id = t.id)
-          AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) >= %s AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) <= %s
-    ''', (current_user.id, start_str, end_str))
-    income = cur.fetchone()['total']
-
-    cur.execute(f'''
-        SELECT COALESCE(SUM(ps.amount), 0) as total
-        FROM payment_splits ps
-        JOIN transactions t ON ps.transaction_id = t.id
-        WHERE t.is_payment = 1 AND t.user_id = %s {shared_filter}
-          AND ps.applied_date >= %s AND ps.applied_date <= %s
-    ''', (current_user.id, start_str, end_str))
-    income += cur.fetchone()['total']
+    shared_filter = 'AND t.is_shared = 0' if view_mode == 'net' else ''
 
     if view_mode == 'gross':
-        amount_case = '''
-            CASE WHEN payer = 'Me' THEN amount ELSE 0 END
-        '''
+        amount_case = "CASE WHEN payer = 'Me' THEN amount ELSE 0 END"
     else:
-        amount_case = '''
-            CASE WHEN payer = 'Me' THEN (amount - COALESCE(reimbursement_amount, 0))
-                 ELSE COALESCE(reimbursement_amount, 0) END
-        '''
-    placeholders = ','.join(['%s'] * len(TRACKED_CATEGORIES))
+        amount_case = "CASE WHEN payer = 'Me' THEN (amount - COALESCE(reimbursement_amount, 0)) ELSE COALESCE(reimbursement_amount, 0) END"
+
+    # Query 1: income — LEFT JOIN replaces correlated NOT EXISTS; UNION ALL merges both income sources
+    cur.execute(f'''
+        SELECT COALESCE(SUM(income), 0) as total FROM (
+            SELECT ABS(t.amount) as income
+            FROM transactions t
+            LEFT JOIN payment_splits ps ON ps.transaction_id = t.id
+            WHERE t.is_payment = 1 AND t.user_id = %s {shared_filter}
+              AND ps.transaction_id IS NULL
+              AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) >= %s
+              AND COALESCE(t.applied_date, CAST(t.date AS TEXT)) <= %s
+            UNION ALL
+            SELECT ps.amount as income
+            FROM payment_splits ps
+            JOIN transactions t ON ps.transaction_id = t.id
+            WHERE t.is_payment = 1 AND t.user_id = %s {shared_filter}
+              AND ps.applied_date >= %s AND ps.applied_date <= %s
+        ) sub
+    ''', (current_user.id, start_str, end_str, current_user.id, start_str, end_str))
+    income = float(cur.fetchone()['total'] or 0)
+
+    # Query 2: all expense categories in one pass — partition tracked vs untracked in Python
     cur.execute(f'''
         SELECT category, SUM({amount_case}) as total
         FROM transactions
         WHERE is_payment = 0 AND user_id = %s
-          AND COALESCE(applied_date, CAST(date AS TEXT)) >= %s AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
-          AND category IN ({placeholders})
+          AND COALESCE(applied_date, CAST(date AS TEXT)) >= %s
+          AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
         GROUP BY category
         HAVING SUM({amount_case}) > 0
-        ORDER BY total DESC
-    ''', (current_user.id, start_str, end_str, *TRACKED_CATEGORIES))
-    categories = [{'name': r['category'], 'total': round(r['total'], 2)} for r in cur.fetchall()]
+    ''', (current_user.id, start_str, end_str))
 
-    cur.execute(f'''
-        SELECT COALESCE(SUM({amount_case}), 0) as total
-        FROM transactions
-        WHERE is_payment = 0 AND user_id = %s
-          AND COALESCE(applied_date, CAST(date AS TEXT)) >= %s AND COALESCE(applied_date, CAST(date AS TEXT)) <= %s
-          AND (category IS NULL OR category = '' OR category NOT IN ({placeholders}))
-    ''', (current_user.id, start_str, end_str, *TRACKED_CATEGORIES))
-    uncategorized = round(cur.fetchone()['total'], 2)
+    category_set = set(TRACKED_CATEGORIES)
+    categories = []
+    uncategorized = 0.0
+    for row in cur.fetchall():
+        total = round(float(row['total'] or 0), 2)
+        if row['category'] in category_set:
+            categories.append({'name': row['category'], 'total': total})
+        else:
+            uncategorized += total
+    categories.sort(key=lambda c: c['total'], reverse=True)
     if uncategorized > 0.01:
-        categories.append({'name': 'Uncategorized', 'total': uncategorized})
+        categories.append({'name': 'Uncategorized', 'total': round(uncategorized, 2)})
 
+    # Query 3: month count for avg toggle
     cur.execute('''
         SELECT COUNT(DISTINCT SUBSTR(COALESCE(applied_date, CAST(date AS TEXT)), 1, 7)) as cnt
         FROM transactions
