@@ -573,8 +573,11 @@ Calls `loadOverviewHistoryChart()` or `loadSankeyChart()` depending on the activ
 **`loadOverviewHistoryChart()`**
 Fetches monthly category data and renders a Plotly stacked bar chart with per-month total labels and a dashed average line.
 
+**`_prefetchSankeyData()`**
+Starts the `/api/sankey-data` fetch immediately and stores the Promise in `_sankeyPromise` keyed by the current params string. Called from `loadSummary()` so the Sankey data is in-flight (or already resolved) before the user navigates to slide 1.
+
 **`loadSankeyChart()`**
-Fetches income and expense data and renders a Plotly Sankey diagram. Uses `arrangement: 'fixed'` with manual node coordinates to pin Savings at the bottom-right, separated from expense categories.
+Fetches income and expense data and renders a Plotly Sankey diagram. Uses `arrangement: 'fixed'` with manual node coordinates to pin Savings at the bottom-right, separated from expense categories. Reuses the in-flight or resolved `_sankeyPromise` if params match, so navigating to slide 1 after the initial overview load renders immediately rather than waiting for a new fetch.
 
 **`setOverviewChartRange(event, range)`**
 Updates the active time-range button and reloads the current Overview chart.

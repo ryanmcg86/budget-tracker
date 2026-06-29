@@ -206,6 +206,7 @@ async function loadSummary() {
 
     try {
         // Fire all independent requests simultaneously — charts don't need summary data
+        _prefetchSankeyData(); // start Sankey fetch in background so slide 1 is ready immediately
         const [response] = await Promise.all([
             fetch(`/api/detailed-summary?year=${year}&month=${month}`),
             loadOverviewInsights(),
@@ -228,6 +229,7 @@ async function loadSummary() {
 let overviewChartRange = '6m'; // Default chart range for the Monthly Spending Trend graph
 let overviewSlide = 0;    // 0 = bar chart, 1 = Sankey
 let sankeyAvgMode = false; // false = Total, true = Avg/mo
+let _sankeyPromise = null; // { key, promise } — deduplicates prefetch and on-demand fetch
 let _overviewTableMode = 'monthly';
 let _overviewTableData = {};
 let _overviewInsightData = {};
@@ -323,14 +325,25 @@ function loadCurrentOverviewChart() {
     else                     loadSankeyChart();
 }
 
+function _prefetchSankeyData() {
+    const year  = document.getElementById('yearSelect').value;
+    const month = document.getElementById('monthSelect').value;
+    if (!year || !month) return;
+    const key = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange }).toString();
+    if (_sankeyPromise && _sankeyPromise.key === key) return; // already in-flight or resolved
+    _sankeyPromise = { key, promise: fetch(`/api/sankey-data?${key}`).then(r => r.json()) };
+}
+
 async function loadSankeyChart() {
     const year  = document.getElementById('yearSelect').value;
     const month = document.getElementById('monthSelect').value;
     if (!year || !month) return;
 
-    const params = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange });
-    const res  = await fetch(`/api/sankey-data?${params.toString()}`);
-    const data = await res.json();
+    const key = new URLSearchParams({ year, month, view_mode: currentViewMode, time_range: overviewChartRange }).toString();
+    if (!_sankeyPromise || _sankeyPromise.key !== key) {
+        _sankeyPromise = { key, promise: fetch(`/api/sankey-data?${key}`).then(r => r.json()) };
+    }
+    const data = await _sankeyPromise.promise;
 
     const divisor = sankeyAvgMode ? (data.months_in_range || 1) : 1;
     const income     = data.income / divisor;
