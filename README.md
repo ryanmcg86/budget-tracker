@@ -547,7 +547,7 @@ CRUD operations on `/api/categories`; each refreshes the category list and updat
 ### Overview Tab
 
 **`loadSummary()`**
-Fires `/api/detailed-summary`, `loadOverviewInsights()`, `loadAccountBreakdown()`, and `loadCurrentOverviewChart()` simultaneously via `Promise.all` so all four requests are in-flight at once. Renders the Overview table when `detailed-summary` resolves; charts and panels render independently as their own responses arrive.
+Two-phase load: Phase 1 awaits `loadCurrentOverviewChart()` alone so the bar chart (the first thing the user sees) gets exclusive server access. Phase 2 fires `detailed-summary`, `loadOverviewInsights()`, and `loadAccountBreakdown()` in parallel while the user reads the chart — the 5-year insights query no longer competes with the chart fetch.
 
 **`switchOverviewTable(mode)`**
 Sets `_overviewTableMode` to `'monthly'`, `'yearly'`, or `'average'`, updates the toggle button styles, and calls `renderActiveOverviewTable()`.

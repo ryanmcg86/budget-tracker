@@ -205,12 +205,14 @@ async function loadSummary() {
     const month = monthSelect.value;
 
     try {
-        // Fire all independent requests simultaneously — charts don't need summary data
+        // Phase 1: render the chart the user sees first — give it exclusive server access
+        await loadCurrentOverviewChart();
+
+        // Phase 2: fire everything else in parallel while the user reads the chart
         const [response] = await Promise.all([
             fetch(`/api/detailed-summary?year=${year}&month=${month}`),
             loadOverviewInsights(),
             loadAccountBreakdown(),
-            loadCurrentOverviewChart(),
         ]);
 
         const data = await response.json();
