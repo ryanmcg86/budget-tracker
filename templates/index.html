@@ -519,8 +519,10 @@
                 <button id="btnBreakdownNet" class="toggle-btn active" onclick="setBreakdownViewMode('net')">Net</button>
             </div>
 
-            <div style="display: grid; grid-template-columns: 250px 1fr; gap: 25px;">
-                <div style="display: flex; flex-direction: column; gap: 16px;">
+            <button id="breakdownSidebarToggle" class="breakdown-sidebar-toggle" onclick="toggleBreakdownSidebar()">&#9660; Filters &amp; Views</button>
+
+            <div class="breakdown-layout">
+                <div class="breakdown-sidebar" style="display: flex; flex-direction: column; gap: 16px;">
                 <section style="background: #fdfdfd; padding: 20px; border: 1px solid #eee; border-radius: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <h4 style="margin: 0;">Saved Views</h4>

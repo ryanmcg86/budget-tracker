@@ -1770,6 +1770,14 @@ function closeAddModal() {
     document.getElementById('addModal').style.display = 'none';
 }
 
+function toggleBreakdownSidebar() {
+    const sidebar = document.querySelector('.breakdown-sidebar');
+    const btn = document.getElementById('breakdownSidebarToggle');
+    if (!sidebar || !btn) return;
+    const isOpen = sidebar.classList.toggle('sidebar-open');
+    btn.textContent = isOpen ? '▲ Hide Filters & Views' : '▼ Filters & Views';
+}
+
 function toggleAddSharedFields() {
     const status = document.getElementById('addSharedStatus').value;
     const fields = document.getElementById('addSharedFields');

@@ -818,6 +818,87 @@ button:not(.tab-btn):not(.toggle-btn):not(.btn-add):not(.btn-move):not(.btn-dele
 }
 
 /* ============================================================
+   Phase 3 — Layout Restructuring
+   ============================================================ */
+
+/* Breakdown tab: desktop grid (replaces inline style) */
+.breakdown-layout {
+    display: grid;
+    grid-template-columns: 250px 1fr;
+    gap: 25px;
+}
+
+/* Collapse toggle — hidden on desktop */
+.breakdown-sidebar-toggle {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    /* Carousel nav arrows — bigger touch targets */
+    #slideLeft, #slideRight {
+        font-size: 2em !important;
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Carousel dots — easier to tap */
+    .slide-dot {
+        width: 12px !important;
+        height: 12px !important;
+    }
+
+    /* Breakdown: single column; sidebar hidden behind toggle */
+    .breakdown-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .breakdown-sidebar {
+        display: none;
+        flex-direction: column;
+        gap: 16px;
+        margin-bottom: 12px;
+    }
+
+    .breakdown-sidebar.sidebar-open {
+        display: flex;
+    }
+
+    /* Toggle button — visible on mobile */
+    .breakdown-sidebar-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        margin-bottom: 12px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 0.9em;
+        font-weight: 600;
+        cursor: pointer;
+        justify-content: center;
+    }
+
+    /* Shared tab: filter bar label alignment when wrapped */
+    #shared .tab-content > div label,
+    #shared > div > label {
+        white-space: nowrap;
+    }
+}
+
+@media (max-width: 480px) {
+    /* Balance summary hero card padding */
+    .balance-card, .balance-hero {
+        padding: 12px !important;
+    }
+}
+
+/* ============================================================
    Phase 2 — Bottom Navigation Bar
    ============================================================ */
 
