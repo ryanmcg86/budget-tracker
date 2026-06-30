@@ -2388,10 +2388,14 @@ function updateSharedSentence(prefix) {
         amtWrapper.style.display = 'none';
         container.style.display = 'flex';
 
-        if (payerSelect.value !== 'Me') {
-            if (btnAdd) btnAdd.style.display = 'none';
-        } else {
-            if (btnAdd) btnAdd.style.display = 'block';
+        // Always show the add button — both "I paid" (others owe me) and
+        // "someone else paid" (I owe them, plus optionally others) need it.
+        if (btnAdd) btnAdd.style.display = 'block';
+
+        // When someone else is the payer and the container is empty, seed one
+        // row so the user has somewhere to enter their share amount immediately.
+        if (payerSelect.value !== 'Me' && container.children.length === 0) {
+            addShareRow(containerId);
         }
     }
 }
