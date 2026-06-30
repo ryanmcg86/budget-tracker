@@ -1627,9 +1627,18 @@ function filterTransactions() {
     renderFilteredTable(filtered);
 }
 
-
+// Debounced version used by the search box oninput — avoids re-filtering on every keystroke
+const filterTransactionsDebounced = debounce(filterTransactions, 150);
 
 function isMobile() { return window.innerWidth <= 768; }
+
+function debounce(fn, ms) {
+    let timer;
+    return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), ms);
+    };
+}
 
 function chartMargins(overrides = {}) {
     const base = isMobile()

@@ -818,6 +818,62 @@ button:not(.tab-btn):not(.toggle-btn):not(.btn-add):not(.btn-move):not(.btn-dele
 }
 
 /* ============================================================
+   Phase 7 — Polish
+   ============================================================ */
+
+/* Eliminate the 300ms tap delay on all interactive elements */
+button, a, select, input, label,
+.tab-btn, .bottom-nav-btn, .toggle-btn, .time-btn,
+.btn-move, .btn-delete, .btn-edit, .btn-add, .btn-primary,
+.txn-card, .slide-dot, .breakdown-sidebar-toggle {
+    touch-action: manipulation;
+}
+
+/* Smooth momentum scrolling on iOS for every scrollable container */
+.table-scroll-container,
+.modal-sheet,
+.modal-sheet-bottom,
+.txn-card-list,
+#tagCheckboxes,
+#existingTagsContainer {
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 768px) {
+    /* Prevent iOS from zooming in when an input is focused —
+       iOS zooms if font-size < 16px; this keeps it at exactly 16px. */
+    input[type="text"],
+    input[type="number"],
+    input[type="date"],
+    input[type="email"],
+    input[type="password"],
+    input[type="search"],
+    select,
+    textarea {
+        font-size: 16px !important;
+    }
+
+    /* Header: center the title and make room for the gear icon on the right */
+    header h1 {
+        text-align: center;
+        font-size: 1.15em;
+        padding: 0 48px; /* symmetrical padding clears the absolute-positioned gear button */
+        margin-bottom: 6px;
+    }
+
+    /* Gear button: keep it right-aligned and big enough to tap */
+    #gearBtn {
+        font-size: 1.6em !important;
+        padding: 6px 8px !important;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+/* ============================================================
    Phase 6 — Modals & Forms
    ============================================================ */
 
