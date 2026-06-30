@@ -494,12 +494,13 @@ async function loadOverviewHistoryChart() {
             .map((cat, i) => {
                 const y = data.categories[cat] || [];
                 if (!y.some(v => Math.abs(v) > 0.01)) return null;
+                const color = colors[i % colors.length];
                 if (singleMonth) {
                     return {
                         x: data.months, y,
                         name: cat,
                         type: 'bar',
-                        marker: { color: colors[i % colors.length] },
+                        marker: { color: hexA(color, 0.82) },
                         hovertemplate: `<b>${cat}</b>: $%{y:,.2f}<extra></extra>`
                     };
                 }
@@ -509,9 +510,9 @@ async function loadOverviewHistoryChart() {
                     type: 'scatter',
                     mode: 'lines',
                     stackgroup: 'one',
-                    line: { width: 0.8, color: colors[i % colors.length] },
-                    fillcolor: hexA(colors[i % colors.length], 0.82),
-                    hoverinfo: 'skip'
+                    line: { width: 0.8, color },
+                    fillcolor: hexA(color, 0.82),
+                    hovertemplate: `<b>${cat}</b>: $%{y:,.2f}<extra></extra>`
                 };
             })
             .filter(Boolean);
@@ -559,7 +560,14 @@ async function loadOverviewHistoryChart() {
 
         const layout = {
             font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
-            xaxis: { title: 'Month', tickfont: { color: '#A2A7B0' }, gridcolor: 'rgba(0,0,0,0)', linecolor: '#565C66' },
+            xaxis: {
+                title: 'Month',
+                tickfont: { color: '#A2A7B0' },
+                gridcolor: 'rgba(0,0,0,0)',
+                linecolor: '#565C66',
+                // For a single bar, clamp range to [-0.5, 0.5] so it fills the full chart width
+                ...(singleMonth ? { range: [-0.5, 0.5] } : {})
+            },
             yaxis: {
                 title: 'Total Spend ($)',
                 tickprefix: '$',
@@ -569,10 +577,11 @@ async function loadOverviewHistoryChart() {
                 rangemode: 'tozero'
             },
             barmode: singleMonth ? 'stack' : undefined,
+            bargap: singleMonth ? 0 : undefined,
             margin: { t: 20, b: 80, l: 60, r: 20 },
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
-            hovermode: singleMonth ? 'closest' : 'x unified',
+            hovermode: 'x unified',
             hoverlabel: {
                 bgcolor: '#2C3037',
                 bordercolor: '#565C66',
