@@ -3412,6 +3412,34 @@ function exportData() {
     window.location.href = '/api/account/export';
 }
 
+async function generateInviteCode() {
+    const display = document.getElementById('inviteCodeDisplay');
+    const copyBtn = document.getElementById('inviteCopyBtn');
+    const msg     = document.getElementById('inviteMsg');
+    display.textContent = '';
+    copyBtn.style.display = 'none';
+    msg.textContent = 'Generating…';
+    const res  = await fetch('/api/generate-invite', { method: 'POST' });
+    const data = await res.json();
+    if (data.code) {
+        display.textContent = data.code;
+        copyBtn.style.display = 'inline-block';
+        msg.textContent = 'Single-use — share this code with your invitee.';
+    } else {
+        msg.textContent = data.error || 'Failed to generate code.';
+    }
+}
+
+function copyInviteCode() {
+    const code = document.getElementById('inviteCodeDisplay').textContent;
+    if (!code) return;
+    navigator.clipboard.writeText(code).then(() => {
+        const msg = document.getElementById('inviteMsg');
+        msg.textContent = 'Copied to clipboard!';
+        setTimeout(() => { msg.textContent = 'Single-use — share this code with your invitee.'; }, 2000);
+    });
+}
+
 async function closeAccount() {
     const email = document.getElementById('acctDeleteConfirm').value.trim().toLowerCase();
     const msg   = document.getElementById('deleteMsg');

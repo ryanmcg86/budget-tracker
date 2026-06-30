@@ -134,6 +134,27 @@
                               cursor:pointer; font-size:0.9em; font-weight:600; text-decoration:none;
                               margin-bottom:24px;">Log Out</a>
 
+                    {% if current_user.id == 1 %}
+                    <div style="border-top:1px solid var(--border); margin-bottom:24px;"></div>
+
+                    <!-- Invite Codes (admin only) -->
+                    <h4 style="margin:0 0 6px; color:var(--ink);">Invite Codes</h4>
+                    <p style="color:var(--muted); font-size:0.875em; margin:0 0 12px;">
+                        Generate a single-use code to share with someone you want to invite.
+                    </p>
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+                        <button onclick="generateInviteCode()"
+                                style="padding:8px 18px; background:var(--accent); color:#fff; border:none;
+                                       border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600;">Generate Code</button>
+                        <span id="inviteCodeDisplay" style="font-size:1em; font-weight:700; letter-spacing:0.08em;
+                              color:var(--ink); font-family:monospace;"></span>
+                        <button id="inviteCopyBtn" onclick="copyInviteCode()" style="display:none; padding:6px 12px;
+                                background:var(--surface-2); color:var(--ink); border:1px solid var(--border);
+                                border-radius:6px; cursor:pointer; font-size:0.85em;">Copy</button>
+                    </div>
+                    <span id="inviteMsg" style="font-size:0.8em; color:var(--muted); display:block; margin-bottom:24px;"></span>
+                    {% endif %}
+
                     <div style="border-top:1px solid rgba(232,123,97,0.4); margin-bottom:20px;"></div>
 
                     <!-- Danger zone -->

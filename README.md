@@ -49,6 +49,9 @@ Renders the login form (GET) or validates credentials and creates a session (POS
 **`GET|POST /register`**
 Invite-gated registration. GET renders the form (invite code + email + password). POST validates the code against `invite_codes` (must exist and be unused), creates the user, marks the code as used with a timestamp and the new email, then logs the user in and redirects to the app.
 
+**`POST /api/generate-invite`**
+Admin-only (user_id == 1). Generates a random `XXXX-XXXX` invite code, stores it in `invite_codes`, and returns it as JSON. Surfaced in Settings → Account → Invite Codes for easy in-app code generation.
+
 **`GET /logout`**
 Clears the session and redirects to `/login`.
 

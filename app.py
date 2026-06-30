@@ -780,6 +780,21 @@ def api_account_delete():
     return jsonify({'ok': True})
 
 
+@app.route('/api/generate-invite', methods=['POST'])
+def api_generate_invite():
+    if current_user.id != 1:
+        return jsonify({'error': 'Unauthorized'}), 403
+    import secrets
+    chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    code = ''.join(secrets.choice(chars) for _ in range(4)) + '-' + ''.join(secrets.choice(chars) for _ in range(4))
+    from database import get_db_connection
+    conn = get_db_connection()
+    conn.execute('INSERT INTO invite_codes (code) VALUES (%s)', (code,))
+    conn.commit()
+    conn.close()
+    return jsonify({'code': code})
+
+
 @app.route('/api/categories', methods=['GET'])
 def api_list_categories():
     from database import get_categories
