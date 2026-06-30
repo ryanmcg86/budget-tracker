@@ -2437,18 +2437,33 @@ function addShareRow(containerId = 'shareRowsContainer', name = '', amount = '')
         `;
     } else {
         // Scenario 2: They paid.
-        const oweLabel = isModalPaymentMode ? "paid me" : "I owe";
-        row.innerHTML = `
-            <span style="font-weight: 700; color: #2980b9;">${payerText}</span>
-            <span style="font-size: 0.9em; color: #666;">${oweLabel}</span>
-            <div style="display: flex; align-items: center; gap: 3px; margin-left: 10px;">
-                <span style="font-weight: bold;">$</span>
-                <input type="number" class="share-amount-input" step="0.01" style="width: 80px; padding: 5px; border-radius: 4px; border: 1px solid #ccc;" value="${amount}">
-            </div>
-            <input type="hidden" class="share-name-select" value="Me">
-            <input type="hidden" class="share-name-custom" value="">
-            <button type="button" onclick="this.parentElement.remove()" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size: 1.2em;">✕</button>
-        `;
+        if (isModalPaymentMode) {
+            // Payment mode: "[Payer] paid me $X"
+            row.innerHTML = `
+                <span style="font-weight: 700; color: #2980b9;">${payerText}</span>
+                <span style="font-size: 0.9em; color: #666;">paid me</span>
+                <div style="display: flex; align-items: center; gap: 3px; margin-left: 10px;">
+                    <span style="font-weight: bold;">$</span>
+                    <input type="number" class="share-amount-input" step="0.01" style="width: 80px; padding: 5px; border-radius: 4px; border: 1px solid #ccc;" value="${amount}">
+                </div>
+                <input type="hidden" class="share-name-select" value="Me">
+                <input type="hidden" class="share-name-custom" value="">
+                <button type="button" onclick="this.parentElement.remove()" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size: 1.2em;">✕</button>
+            `;
+        } else {
+            // Expense mode: "I owe [Payer] $X"
+            row.innerHTML = `
+                <span style="font-size: 0.9em; color: #666;">I owe</span>
+                <span style="font-weight: 700; color: #2980b9;">${payerText}</span>
+                <div style="display: flex; align-items: center; gap: 3px; margin-left: 10px;">
+                    <span style="font-weight: bold;">$</span>
+                    <input type="number" class="share-amount-input" step="0.01" style="width: 80px; padding: 5px; border-radius: 4px; border: 1px solid #ccc;" value="${amount}">
+                </div>
+                <input type="hidden" class="share-name-select" value="Me">
+                <input type="hidden" class="share-name-custom" value="">
+                <button type="button" onclick="this.parentElement.remove()" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size: 1.2em;">✕</button>
+            `;
+        }
     }
     container.appendChild(row);
 }
