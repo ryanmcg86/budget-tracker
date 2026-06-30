@@ -1888,6 +1888,15 @@ function closeAddModal() {
     document.getElementById('addModal').style.display = 'none';
 }
 
+function toggleTxnSection(section) {
+    const collapsible = document.getElementById(section + 'Collapsible');
+    const chevron     = document.getElementById(section + 'Chevron');
+    if (!collapsible) return;
+    const isHidden = collapsible.style.display === 'none';
+    collapsible.style.display = isHidden ? '' : 'none';
+    if (chevron) chevron.textContent = isHidden ? '▼' : '▶';
+}
+
 function toggleBreakdownSidebar() {
     const sidebar = document.querySelector('.breakdown-sidebar');
     const btn = document.getElementById('breakdownSidebarToggle');

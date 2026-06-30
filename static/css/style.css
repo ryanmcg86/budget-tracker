@@ -821,6 +821,23 @@ button:not(.tab-btn):not(.toggle-btn):not(.btn-add):not(.btn-move):not(.btn-dele
    Phase 7 — Polish
    ============================================================ */
 
+/* Collapsible transaction sections */
+.txn-section-header {
+    cursor: pointer;
+    user-select: none;
+}
+
+.txn-section-header:hover h3 {
+    opacity: 0.8;
+}
+
+.txn-chevron {
+    font-size: 0.75em;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+    display: inline-block;
+}
+
 /* Eliminate the 300ms tap delay on all interactive elements */
 button, a, select, input, label,
 .tab-btn, .bottom-nav-btn, .toggle-btn, .time-btn,

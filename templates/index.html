@@ -356,69 +356,75 @@
 
             <!-- TABLE 1: EXPENSES -->
             <div class="transactions-list-full">
-                <!-- Flex container to keep Title on left and Total on right -->
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0;">Expenses</h3>
-                    
-                    <!-- Hidden total container that JS will toggle -->
+                <div class="txn-section-header" onclick="toggleTxnSection('expense')"
+                     style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="margin: 0; display:flex; align-items:center; gap:8px;">
+                        <span id="expenseChevron" class="txn-chevron">▼</span>Expenses
+                    </h3>
                     <div id="expenseTotalContainer" style="display: none; font-size: 1.1em; font-weight: 700; color: #764ba2;">
                         Total: <span id="expenseTotalValue">$0.00</span>
                     </div>
                 </div>
 
-                <div class="table-scroll-container" id="expenseTableWrap">
-                    <table id="fullTransactionsTable">
-                        <thead>
-                            <tr>
-                                <th style="width: 40px;">
-                                    <input type="checkbox" id="selectAllExpenses" onclick="toggleAll('expenses')">
-                                </th>
-                                <th>Date</th>
-                                <th>Description</th>
-                                <th>Category</th>
-                                <th>Bank Category</th>
-                                <th>Account</th>
-                                <th>Shared</th>
-                                <th>Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody id="fullTransactionsBody"></tbody>
-                    </table>
+                <div id="expenseCollapsible">
+                    <div class="table-scroll-container" id="expenseTableWrap">
+                        <table id="fullTransactionsTable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;">
+                                        <input type="checkbox" id="selectAllExpenses" onclick="toggleAll('expenses')">
+                                    </th>
+                                    <th>Date</th>
+                                    <th>Description</th>
+                                    <th>Category</th>
+                                    <th>Bank Category</th>
+                                    <th>Account</th>
+                                    <th>Shared</th>
+                                    <th>Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fullTransactionsBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="expenseCardList" class="txn-card-list"></div>
                 </div>
-                <div id="expenseCardList" class="txn-card-list"></div>
             </div>
 
 
             <!-- TABLE 2: PAYMENTS & CREDITS -->
             <div class="transactions-list-full" style="margin-top: 40px; border-top: 2px solid #eee; padding-top: 20px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0; color: #27ae60;">Payments & Credits</h3>
-                    
+                <div class="txn-section-header" onclick="toggleTxnSection('payment')"
+                     style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="margin: 0; color: #27ae60; display:flex; align-items:center; gap:8px;">
+                        <span id="paymentChevron" class="txn-chevron">▼</span>Payments &amp; Credits
+                    </h3>
                     <div id="paymentTotalContainer" style="display: none; font-size: 1.1em; font-weight: 700; color: #27ae60;">
                         Total: <span id="paymentTotalValue">$0.00</span>
                     </div>
                 </div>
 
-                <div class="table-scroll-container" id="paymentTableWrap">
-                    <table id="paymentsTable">
-                        <thead>
-                            <tr>
-                                <th style="width: 40px;">
-                                    <input type="checkbox" id="selectAllPayments" onclick="toggleAll('payments')">
-                                </th>
-                                <th>Date</th>
-                                <th>Description</th>
-                                <th>Category</th>
-                                <th>Bank Category</th>
-                                <th>Account</th>
-                                <th>Shared</th>
-                                <th>Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody id="paymentsBody"></tbody>
-                    </table>
+                <div id="paymentCollapsible">
+                    <div class="table-scroll-container" id="paymentTableWrap">
+                        <table id="paymentsTable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;">
+                                        <input type="checkbox" id="selectAllPayments" onclick="toggleAll('payments')">
+                                    </th>
+                                    <th>Date</th>
+                                    <th>Description</th>
+                                    <th>Category</th>
+                                    <th>Bank Category</th>
+                                    <th>Account</th>
+                                    <th>Shared</th>
+                                    <th>Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentsBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="paymentCardList" class="txn-card-list"></div>
                 </div>
-                <div id="paymentCardList" class="txn-card-list"></div>
             </div>
         </div> <!-- CLOSE TRANSACTIONS TAB -->
 
