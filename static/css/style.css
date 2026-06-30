@@ -818,6 +818,64 @@ button:not(.tab-btn):not(.toggle-btn):not(.btn-add):not(.btn-move):not(.btn-dele
 }
 
 /* ============================================================
+   Phase 2 — Bottom Navigation Bar
+   ============================================================ */
+
+.bottom-nav {
+    display: none; /* hidden on desktop */
+}
+
+@media (max-width: 768px) {
+    /* Hide top tab bar, show bottom nav */
+    .tab-nav { display: none !important; }
+
+    .bottom-nav {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 60px;
+        background: var(--card);
+        border-top: 1px solid var(--border);
+        z-index: 100;
+    }
+
+    .bottom-nav-btn {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        background: none;
+        border: none;
+        border-radius: 0;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: unset; /* override the 44px rule — nav bar is fixed height */
+        padding: 6px 2px;
+        transition: color 0.15s ease;
+    }
+
+    .bottom-nav-icon {
+        font-size: 18px;
+        line-height: 1;
+    }
+
+    .bottom-nav-btn.active {
+        color: var(--accent);
+    }
+
+    /* Pad tab content so it doesn't hide behind the nav bar */
+    .tab-content {
+        padding-bottom: 68px;
+    }
+}
+
+/* ============================================================
    Phase 1 — Responsive Foundation
    ============================================================ */
 

@@ -1074,6 +1074,15 @@ async function openTab(evt, tabId) {
         tablinks[i].classList.remove("active");
     }
 
+    // Sync bottom nav active state
+    const bottomNavBtns = document.getElementsByClassName("bottom-nav-btn");
+    for (let i = 0; i < bottomNavBtns.length; i++) {
+        bottomNavBtns[i].classList.remove("active");
+        if (bottomNavBtns[i].dataset.tab === tabId) {
+            bottomNavBtns[i].classList.add("active");
+        }
+    }
+
     const selectedTab = document.getElementById(tabId);
     if (selectedTab) {
         selectedTab.style.display = "block";

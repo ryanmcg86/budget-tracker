@@ -914,5 +914,29 @@
         </div>
 
     </div>
+
+    <!-- Bottom navigation bar — visible only on mobile (≤768px) -->
+    <nav class="bottom-nav" id="bottomNav">
+        <button class="bottom-nav-btn active" data-tab="overview" onclick="openTab(event, 'overview')">
+            <span class="bottom-nav-icon">&#x1F4CA;</span>
+            <span>Overview</span>
+        </button>
+        <button class="bottom-nav-btn" data-tab="upload" onclick="openTab(event, 'upload')">
+            <span class="bottom-nav-icon">&#x2B06;</span>
+            <span>Import</span>
+        </button>
+        <button class="bottom-nav-btn" data-tab="transactions" onclick="openTab(event, 'transactions')">
+            <span class="bottom-nav-icon">&#x1F4CB;</span>
+            <span>Txns</span>
+        </button>
+        <button class="bottom-nav-btn" data-tab="shared" onclick="openTab(event, 'shared')">
+            <span class="bottom-nav-icon">&#x1F465;</span>
+            <span>Shared</span>
+        </button>
+        <button class="bottom-nav-btn" data-tab="detailedBreakdowns" onclick="openTab(event, 'detailedBreakdowns')">
+            <span class="bottom-nav-icon">&#x1F50D;</span>
+            <span>Breakdown</span>
+        </button>
+    </nav>
 </body>
 </html>
