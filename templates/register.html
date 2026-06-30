@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spending Tracker — Sign In</title>
+    <title>Spending Tracker — Create Account</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
         body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
@@ -44,12 +44,25 @@
             font-size: 0.875em;
             margin-bottom: 16px;
         }
+        .login-footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.85em;
+            color: var(--muted);
+        }
+        .login-footer a { color: var(--accent); text-decoration: none; }
+        .login-footer a:hover { text-decoration: underline; }
+        .divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 24px 0 20px;
+        }
     </style>
 </head>
 <body>
     <div class="login-card">
         <h1>Spending Tracker</h1>
-        <p class="subtitle" style="color: var(--muted); font-size: 0.9em;">Sign in to your account</p>
+        <p class="subtitle" style="color: var(--muted); font-size: 0.9em;">Create your account</p>
 
         {% with messages = get_flashed_messages() %}
             {% if messages %}
@@ -59,18 +72,30 @@
 
         <form method="POST">
             <div class="login-field">
+                <label for="invite_code">Invite Code</label>
+                <input id="invite_code" name="invite_code" type="text"
+                       autocomplete="off" autofocus required
+                       placeholder="XXXX-XXXX"
+                       style="text-transform: uppercase; letter-spacing: 0.05em;">
+            </div>
+            <hr class="divider">
+            <div class="login-field">
                 <label for="email">Email</label>
-                <input id="email" name="email" type="email" autocomplete="email" autofocus required>
+                <input id="email" name="email" type="email" autocomplete="email" required>
             </div>
             <div class="login-field">
                 <label for="password">Password</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" required>
+                <input id="password" name="password" type="password" autocomplete="new-password" required>
             </div>
-            <button type="submit" class="login-submit">Sign In</button>
+            <div class="login-field">
+                <label for="confirm_password">Confirm Password</label>
+                <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required>
+            </div>
+            <button type="submit" class="login-submit">Create Account</button>
         </form>
 
-        <div style="text-align: center; margin-top: 20px; font-size: 0.85em; color: var(--muted);">
-            Have an invite code? <a href="{{ url_for('auth.register') }}" style="color: var(--accent); text-decoration: none;">Create an account</a>
+        <div class="login-footer">
+            Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a>
         </div>
     </div>
 </body>

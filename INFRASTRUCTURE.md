@@ -32,7 +32,7 @@ graph TB
 
         subgraph RenderDB["Render PostgreSQL  ·  1 GB"]
             direction TB
-            Tables["users · transactions · categories\ntags · transaction_tags · transaction_shares\npayment_splits · plaid_accounts\nsettlements · breakdown_views"]
+            Tables["users · transactions · categories\ntags · transaction_tags · transaction_shares\npayment_splits · plaid_accounts\nsettlements · breakdown_views · invite_codes"]
             Indexes["Indexes:\n(user_id, date) · (user_id, applied_date)\n(user_id, is_payment)\npayment_splits(transaction_id)\ntransaction_shares(transaction_id)"]
         end
 
@@ -68,7 +68,7 @@ graph TB
 |---|---|
 | DB portability | `_SQLiteConn` / `_PGConn` wrappers — same SQL, `%s` params everywhere |
 | Concurrency | `gthread` worker — 4 threads share 1 process (memory-efficient on 256 MB) |
-| Auth | Flask-Login + bcrypt; invite-only (`create_user.py` CLI) |
+| Auth | Flask-Login + bcrypt; invite-gated self-registration (`/register` + `create_invite.py` CLI) |
 | Performance | Client-side `_apiCache` (URL-keyed); two-phase `loadSummary`; prefetch Sankey + Shared Ledger |
 | Plaid | `plaid_integration.py` isolated; `PLAID_ENV` env var switches sandbox ↔ production |
 

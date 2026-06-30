@@ -293,6 +293,17 @@ def init_db():
     ''')
     conn.commit()
 
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS invite_codes (
+            id           {pk},
+            code         TEXT UNIQUE NOT NULL,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            used_at      TIMESTAMP,
+            used_by_email TEXT
+        )
+    ''')
+    conn.commit()
+
     # Indexes
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_transaction_date ON transactions(date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date)')

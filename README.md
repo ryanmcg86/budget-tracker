@@ -13,8 +13,9 @@ Runs on **SQLite locally** (zero config) and **PostgreSQL in production** (auto-
 ```
 spending-tracker/
 ├── app.py                    # Flask application — all API routes
-├── auth.py                   # Flask-Login setup, User model, login/logout routes
-├── create_user.py            # CLI script to create new invite-only user accounts
+├── auth.py                   # Flask-Login setup, User model, login/logout/register routes
+├── create_user.py            # CLI script to create user accounts directly (bypasses invite flow)
+├── create_invite.py          # CLI script to generate single-use invite codes
 ├── database.py               # DB connection wrappers, schema, migrations, query helpers
 ├── migrate_to_postgres.py    # One-time script to copy SQLite data into PostgreSQL
 ├── plaid_integration.py      # Plaid API client (link tokens, token exchange, transaction fetch)
@@ -44,6 +45,9 @@ Flask-Login user model. Holds `id` and `email`. `User.get(user_id)` loads by pri
 
 **`GET|POST /login`**
 Renders the login form (GET) or validates credentials and creates a session (POST). Passwords are verified with bcrypt. Sessions persist across browser restarts (`remember=True`).
+
+**`GET|POST /register`**
+Invite-gated registration. GET renders the form (invite code + email + password). POST validates the code against `invite_codes` (must exist and be unused), creates the user, marks the code as used with a timestamp and the new email, then logs the user in and redirects to the app.
 
 **`GET /logout`**
 Clears the session and redirects to `/login`.
