@@ -818,6 +818,50 @@ button:not(.tab-btn):not(.toggle-btn):not(.btn-add):not(.btn-move):not(.btn-dele
 }
 
 /* ============================================================
+   Phase 5 — Charts
+   ============================================================ */
+
+/* Sankey mobile summary — hidden on desktop, JS shows on mobile */
+.sankey-mobile-summary { display: none; }
+
+.sankey-summary-block {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 8px;
+}
+
+.sankey-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 0.9em;
+    color: var(--muted);
+}
+
+.sankey-summary-header {
+    font-weight: 700;
+    font-size: 1em;
+    color: var(--text);
+}
+
+.sankey-summary-cat {
+    padding-left: 10px;
+}
+
+.sankey-summary-val {
+    font-variant-numeric: tabular-nums;
+}
+
+.sankey-summary-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+}
+
+/* ============================================================
    Phase 4 — Transaction Cards
    ============================================================ */
 

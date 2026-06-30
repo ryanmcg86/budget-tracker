@@ -432,6 +432,40 @@ async function loadSankeyChart() {
         nodeY.push(0.88); // Deficit: bottom-left
     }
 
+    // On mobile swap the Sankey for a readable text summary — the diagram is too dense at small widths
+    if (isMobile()) {
+        document.getElementById('overviewSankeyChart').style.display = 'none';
+        const label = sankeyAvgMode ? '/mo' : '';
+        const fmt = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const savingsColor = savings >= 0 ? '#27ae60' : '#e74c3c';
+        const savingsLabel = savings >= 0 ? 'Savings' : 'Deficit';
+        const catRows = categories.map(c =>
+            `<div class="sankey-summary-row">
+                <span class="sankey-summary-cat">${c.name}</span>
+                <span class="sankey-summary-val" style="color:#C9CDD3;">${fmt(c.total)}${label}</span>
+            </div>`
+        ).join('');
+        document.getElementById('sankeyMobileSummary').style.display = 'block';
+        document.getElementById('sankeyMobileSummary').innerHTML = `
+            <div class="sankey-summary-block">
+                <div class="sankey-summary-row sankey-summary-header">
+                    <span>Income</span>
+                    <span style="color:#43e97b;">${fmt(income)}${label}</span>
+                </div>
+                <div class="sankey-summary-divider"></div>
+                ${catRows}
+                <div class="sankey-summary-divider"></div>
+                <div class="sankey-summary-row sankey-summary-header">
+                    <span>${savingsLabel}</span>
+                    <span style="color:${savingsColor};">${fmt(Math.abs(savings))}${label}</span>
+                </div>
+            </div>`;
+        return;
+    }
+
+    document.getElementById('sankeyMobileSummary').style.display = 'none';
+    document.getElementById('overviewSankeyChart').style.display = 'block';
+
     const trace = {
         type: 'sankey',
         orientation: 'h',
@@ -558,27 +592,28 @@ async function loadOverviewHistoryChart() {
 
         const chartData = singleMonth ? visibleTraces : [...visibleTraces, totalTrace];
 
+        const mobile = isMobile();
         const layout = {
             font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
             xaxis: {
-                title: 'Month',
-                tickfont: { color: '#A2A7B0' },
+                title: mobile ? '' : 'Month',
+                tickfont: { color: '#A2A7B0', size: mobile ? 9 : 11 },
+                tickangle: mobile ? -55 : 0,
                 gridcolor: 'rgba(0,0,0,0)',
                 linecolor: '#565C66',
-                // For a single bar, clamp range to [-0.5, 0.5] so it fills the full chart width
                 ...(singleMonth ? { range: [-0.5, 0.5] } : {})
             },
             yaxis: {
-                title: 'Total Spend ($)',
+                title: mobile ? '' : 'Total Spend ($)',
                 tickprefix: '$',
-                tickfont: { color: '#A2A7B0' },
+                tickfont: { color: '#A2A7B0', size: mobile ? 9 : 11 },
                 gridcolor: '#4D535D',
                 zerolinecolor: '#565C66',
                 rangemode: 'tozero'
             },
             barmode: singleMonth ? 'stack' : undefined,
             bargap: singleMonth ? 0 : undefined,
-            margin: { t: 20, b: 80, l: 60, r: 20 },
+            margin: chartMargins(mobile ? { b: 70 } : {}),
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
             hovermode: 'x unified',
@@ -588,7 +623,7 @@ async function loadOverviewHistoryChart() {
                 font: { color: '#F3F4F5', family: 'Schibsted Grotesk, sans-serif', size: 13 }
             },
             showlegend: true,
-            legend: { orientation: 'h', x: 0, y: -0.3, font: { color: '#C9CDD3' } },
+            legend: { orientation: 'h', x: 0, y: mobile ? -0.45 : -0.3, font: { color: '#C9CDD3', size: mobile ? 10 : 12 } },
             shapes: avgShape,
             annotations: avgAnnotation
         };
@@ -669,16 +704,17 @@ function renderPieChart(divId, dataMap) {
         hovertemplate: '<b>%{x}</b><br>$%{y:,.2f}<extra></extra>'
     }];
 
+    const mobile = isMobile();
     const layout = {
-        height: 350,
-        margin: { t: 16, b: 95, l: 58, r: 16 },
+        height: mobile ? 240 : 350,
+        margin: { t: 12, b: mobile ? 60 : 95, l: mobile ? 36 : 58, r: 12 },
         showlegend: false,
         font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         bargap: 0.35,
-        xaxis: { tickangle: -40, tickfont: { color: '#A2A7B0', size: 11 }, gridcolor: 'rgba(0,0,0,0)' },
-        yaxis: { tickprefix: '$', tickfont: { color: '#A2A7B0', size: 11 }, gridcolor: '#4D535D', zerolinecolor: '#565C66' }
+        xaxis: { tickangle: mobile ? -55 : -40, tickfont: { color: '#A2A7B0', size: mobile ? 9 : 11 }, gridcolor: 'rgba(0,0,0,0)' },
+        yaxis: { tickprefix: '$', tickfont: { color: '#A2A7B0', size: mobile ? 9 : 11 }, gridcolor: '#4D535D', zerolinecolor: '#565C66' }
     };
 
     Plotly.newPlot(divId, chartData, layout, {responsive: true, displayModeBar: false});
@@ -1305,19 +1341,17 @@ async function loadBreakdownData() {
         }
     ];
 
+    const mobile = isMobile();
     const layout = {
-        title: {
-            text: `Spending Trend: ${category}`,
-            font: { size: 16, color: '#F3F4F5' }
-        },
+        ...(mobile ? {} : { title: { text: `Spending Trend: ${category}`, font: { size: 16, color: '#F3F4F5' } } }),
         font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
-        xaxis: { title: 'Month', tickfont: { color: '#A2A7B0' }, gridcolor: 'rgba(0,0,0,0)', linecolor: '#565C66' },
-        yaxis: { title: 'Total Spend ($)', tickprefix: '$', tickfont: { color: '#A2A7B0' }, gridcolor: '#4D535D', zerolinecolor: '#565C66' },
-        margin: { t: 60, b: 80, l: 60, r: 20 },
+        xaxis: { title: mobile ? '' : 'Month', tickfont: { color: '#A2A7B0', size: mobile ? 9 : 11 }, tickangle: mobile ? -55 : 0, gridcolor: 'rgba(0,0,0,0)', linecolor: '#565C66' },
+        yaxis: { title: mobile ? '' : 'Total Spend ($)', tickprefix: '$', tickfont: { color: '#A2A7B0', size: mobile ? 9 : 11 }, gridcolor: '#4D535D', zerolinecolor: '#565C66' },
+        margin: chartMargins(mobile ? {} : { t: 60 }),
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         showlegend: true,
-        legend: { orientation: 'h', x: 0, y: -0.2, font: { color: '#C9CDD3' } }
+        legend: { orientation: 'h', x: 0, y: mobile ? -0.4 : -0.2, font: { color: '#C9CDD3', size: mobile ? 10 : 12 } }
     };
 
     Plotly.newPlot('breakdownHistoryChart', chartData, layout, {responsive: true, displayModeBar: false});
@@ -1596,6 +1630,13 @@ function filterTransactions() {
 
 
 function isMobile() { return window.innerWidth <= 768; }
+
+function chartMargins(overrides = {}) {
+    const base = isMobile()
+        ? { t: 10, b: 55, l: 42, r: 10 }
+        : { t: 20, b: 80, l: 60, r: 20 };
+    return { ...base, ...overrides };
+}
 
 let _lastTransactionData = null;
 
@@ -3247,15 +3288,16 @@ function renderComparisonChart(results) {
         });
     }
 
+    const mobile = isMobile();
     Plotly.newPlot('breakdownHistoryChart', traces, {
         font: { color: '#C9CDD3', family: 'Schibsted Grotesk, sans-serif' },
-        xaxis: { title: 'Month', tickfont: { color: '#A2A7B0' }, gridcolor: 'rgba(0,0,0,0)', linecolor: '#565C66' },
-        yaxis: { title: 'Total Spend ($)', tickprefix: '$', tickfont: { color: '#A2A7B0' }, gridcolor: '#4D535D', zerolinecolor: '#565C66' },
-        margin: { t: 30, b: 80, l: 60, r: 20 },
+        xaxis: { title: mobile ? '' : 'Month', tickfont: { color: '#A2A7B0', size: mobile ? 9 : 11 }, tickangle: mobile ? -55 : 0, gridcolor: 'rgba(0,0,0,0)', linecolor: '#565C66' },
+        yaxis: { title: mobile ? '' : 'Total Spend ($)', tickprefix: '$', tickfont: { color: '#A2A7B0', size: mobile ? 9 : 11 }, gridcolor: '#4D535D', zerolinecolor: '#565C66' },
+        margin: chartMargins(),
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         showlegend: true,
-        legend: { orientation: 'h', x: 0, y: -0.3, font: { color: '#C9CDD3' } }
+        legend: { orientation: 'h', x: 0, y: mobile ? -0.4 : -0.3, font: { color: '#C9CDD3', size: mobile ? 10 : 12 } }
     }, { responsive: true, displayModeBar: false });
 }
 
