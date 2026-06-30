@@ -817,31 +817,81 @@ button:not(.tab-btn):not(.toggle-btn):not(.btn-add):not(.btn-move):not(.btn-dele
     cursor: pointer;
 }
 
-/* ---------- Mobile ---------- */
-@media (max-width: 768px) {
-    body { padding: 12px; }
-    .container { padding: 20px; border-radius: 14px; }
-    h1 { font-size: 1.4em; }
+/* ============================================================
+   Phase 1 — Responsive Foundation
+   ============================================================ */
 
+/* Tablet landscape */
+@media (max-width: 1024px) {
+    .container { padding: 24px 26px; }
+    .filter-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Tablet / large phone */
+@media (max-width: 768px) {
+    /* Full-bleed layout — container fills the screen edge to edge */
+    body { padding: 0; }
+    .container {
+        padding: 16px;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+    }
+
+    h1 { font-size: 1.3em; }
+    h2 { font-size: 1.1em; }
+
+    /* Touch targets — 44px minimum (Apple HIG / WCAG) */
+    button, .tab-btn, .toggle-btn,
+    .btn-move, .btn-delete, .btn-edit, .btn-add, .btn-primary,
+    select, input:not([type="checkbox"]):not([type="radio"]) {
+        min-height: 44px;
+    }
+
+    /* Tab nav */
     .tab-nav { display: flex; flex-wrap: wrap; width: 100%; }
     .tab-btn { flex: 1; }
 
-    .file-input-wrapper { flex-direction: column; align-items: stretch; }
-    .btn-primary { width: 100%; }
-
-    .transaction-item { flex-direction: column; align-items: flex-start; gap: 10px; }
+    /* Overview layout */
     .summary-grid, .overview-grid { grid-template-columns: 1fr; }
     .overview-row { flex-direction: column; }
     .overview-row .chart-container { width: 100%; min-height: 300px; }
 
-    .filter-grid { grid-template-columns: 1fr; }
+    /* Filter grid — 2 columns on tablet */
+    .filter-grid { grid-template-columns: repeat(2, 1fr); }
     .date-filters { flex-direction: row; }
 
+    /* Category bars — release fixed widths so they flex */
+    .cat-name   { flex: 1 1 auto; width: auto; min-width: 0; font-size: 0.8em; }
+    .cat-amount { flex: 0 0 auto; width: auto; min-width: 64px; }
+    .cat-pct    { display: none; }
+
+    /* Buttons */
+    .file-input-wrapper { flex-direction: column; align-items: stretch; }
+    .btn-primary { width: 100%; }
     .btn-move, .btn-delete, .btn-edit, .btn-add {
-        width: 100%;
         padding: 10px 5px;
         min-width: auto;
     }
+
+    /* Tables */
     th, td { padding: 8px 4px; font-size: 0.85em; }
     .table-scroll-container { max-height: 350px; }
+
+    /* Transaction items */
+    .transaction-item { flex-direction: column; align-items: flex-start; gap: 10px; }
+}
+
+/* Small phone */
+@media (max-width: 480px) {
+    .container { padding: 10px; }
+
+    /* Single column filter grid on small phones */
+    .filter-grid { grid-template-columns: 1fr; }
+
+    /* Compact time-range buttons so they fit in one row */
+    .chart-time-controls .time-btn { font-size: 0.72em; padding: 5px 8px; margin-left: 3px; }
+
+    /* Stack action buttons vertically */
+    .btn-move, .btn-delete, .btn-edit, .btn-add { width: 100%; }
 }

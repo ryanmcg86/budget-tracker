@@ -4,6 +4,8 @@ A personal finance web app built with Flask. Transactions can be imported via CS
 
 Access is invite-only — there is no public registration. Each user's data is fully isolated; every query is scoped to `current_user.id`.
 
+The UI is fully responsive: breakpoints at 1024px (tablet landscape), 768px (tablet/phone), and 480px (small phone). Phase 1 foundation CSS is in place; the mobile redesign is ongoing.
+
 Runs on **SQLite locally** (zero config) and **PostgreSQL in production** (auto-detected via `DATABASE_URL`).
 
 ---
