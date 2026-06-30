@@ -818,6 +818,89 @@ button:not(.tab-btn):not(.toggle-btn):not(.btn-add):not(.btn-move):not(.btn-dele
 }
 
 /* ============================================================
+   Phase 4 — Transaction Cards
+   ============================================================ */
+
+.txn-card-list {
+    display: none; /* JS shows this on mobile */
+}
+
+.txn-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: background 0.1s ease;
+}
+
+.txn-card:active {
+    background: var(--surface-2);
+}
+
+.txn-card-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.txn-card-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.txn-card-date {
+    font-size: 0.78em;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.txn-card-applied {
+    font-size: 0.9em;
+    color: #e67e22;
+}
+
+.txn-card-desc {
+    font-weight: 600;
+    font-size: 0.95em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.txn-card-amount {
+    font-weight: 700;
+    font-size: 1em;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.txn-card-bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+    padding-left: 28px; /* indent past the checkbox */
+}
+
+.txn-card-shared {
+    background: rgba(118, 75, 162, 0.15);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+}
+
+/* ============================================================
    Phase 3 — Layout Restructuring
    ============================================================ */
 

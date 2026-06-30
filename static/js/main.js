@@ -1595,16 +1595,85 @@ function filterTransactions() {
 
 
 
+function isMobile() { return window.innerWidth <= 768; }
+
+let _lastTransactionData = null;
+
+function renderCardView(txns, listId, isPayment) {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    const checkClass = isPayment ? 'payment-check' : 'expense-check';
+    if (txns.length === 0) {
+        list.innerHTML = `<div style="text-align:center;padding:24px;color:var(--muted);">No ${isPayment ? 'payments' : 'expenses'} found</div>`;
+        return;
+    }
+    list.innerHTML = txns.map(txn => {
+        const appliedBadge = txn.applied_date
+            ? `<span class="txn-card-applied">→ ${fmtAppliedDate(txn.applied_date)}</span>` : '';
+        const sharedBadge = txn.is_shared == 1
+            ? `<span class="txn-card-shared">Shared</span>` : '';
+        const tagPills = (txn.tags || []).map(t =>
+            `<span class="transaction-tag" style="font-size:0.75em;padding:2px 7px;">${t.name}</span>`
+        ).join('');
+        const amtStyle = isPayment ? 'color:#27ae60' : 'color:var(--text)';
+        const amtPrefix = isPayment ? '+' : '';
+        return `
+        <div class="txn-card" onclick="openEditSingle(${txn.id},${isPayment})">
+            <div class="txn-card-top">
+                <input type="checkbox" class="${checkClass}" value="${txn.id}"
+                       onclick="event.stopPropagation()"
+                       style="width:18px;height:18px;flex-shrink:0;cursor:pointer;min-height:unset;">
+                <div class="txn-card-info">
+                    <span class="txn-card-date">${formatDate(txn.date)}${appliedBadge}</span>
+                    <span class="txn-card-desc">${txn.description}</span>
+                </div>
+                <span class="txn-card-amount" style="${amtStyle}">${amtPrefix}$${Math.abs(txn.amount).toFixed(2)}</span>
+            </div>
+            <div class="txn-card-bottom">
+                <span class="tag-user">${txn.category}</span>
+                <span class="${getAccountClass(txn.card_name)}">${txn.card_name || 'Unknown'}</span>
+                ${sharedBadge}${tagPills}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function openEditSingle(id, isPayment) {
+    document.querySelectorAll('.expense-check, .payment-check').forEach(c => { c.checked = false; });
+    const cls = isPayment ? '.payment-check' : '.expense-check';
+    const box = document.querySelector(`${cls}[value="${id}"]`);
+    if (box) box.checked = true;
+    openEditModal();
+}
+
 function renderFilteredTable(data) {
-    const expenseBody = document.getElementById('fullTransactionsBody');
-    const paymentBody = document.getElementById('paymentsBody');
-    
-    // 1. Separate the data based on the is_payment flag we added to the DB
-    // In main.js -> renderFilteredTable
+    _lastTransactionData = data;
+
+    const expenseTableWrap = document.getElementById('expenseTableWrap');
+    const paymentTableWrap = document.getElementById('paymentTableWrap');
+    const expenseCardList  = document.getElementById('expenseCardList');
+    const paymentCardList  = document.getElementById('paymentCardList');
+
     const expenses = data.filter(txn => txn.is_payment == 0 || txn.is_payment === false);
     const payments = data.filter(txn => txn.is_payment == 1 || txn.is_payment === true);
 
-    // 2. Render the Expense Table
+    if (isMobile()) {
+        if (expenseTableWrap) expenseTableWrap.style.display = 'none';
+        if (paymentTableWrap) paymentTableWrap.style.display = 'none';
+        if (expenseCardList)  { expenseCardList.style.display = 'block'; renderCardView(expenses, 'expenseCardList', false); }
+        if (paymentCardList)  { paymentCardList.style.display = 'block'; renderCardView(payments, 'paymentCardList', true); }
+        return;
+    }
+
+    // Desktop: tables
+    if (expenseTableWrap) expenseTableWrap.style.display = '';
+    if (paymentTableWrap) paymentTableWrap.style.display = '';
+    if (expenseCardList)  expenseCardList.style.display = 'none';
+    if (paymentCardList)  paymentCardList.style.display = 'none';
+
+    const expenseBody = document.getElementById('fullTransactionsBody');
+    const paymentBody = document.getElementById('paymentsBody');
+
     if (expenses.length === 0) {
         expenseBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No expenses found</td></tr>';
     } else {
@@ -1626,11 +1695,10 @@ function renderFilteredTable(data) {
                 <td style="text-align: center;">${txn.is_shared == 1 ? '✓' : ''}</td>
                 <td style="font-weight:700;">$${Math.abs(txn.amount).toFixed(2)}</td>
             </tr>`
-            ).join('');
+        ).join('');
     }
 
-    // 3. Render the Payment Table
-    if (paymentBody) { // Check if the table exists in HTML
+    if (paymentBody) {
         if (payments.length === 0) {
             paymentBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No payments found</td></tr>';
         } else {
@@ -1651,8 +1719,8 @@ function renderFilteredTable(data) {
                     <td><span class="${getAccountClass(txn.card_name)}">${txn.card_name}</span></td>
                     <td style="text-align: center;">${txn.is_shared == 1 ? '✓' : ''}</td>
                     <td style="color: #27ae60; font-weight:700;">+$${Math.abs(txn.amount).toFixed(2)}</td>
-                </tr>
-                `).join('');
+                </tr>`
+            ).join('');
         }
     }
 }
@@ -3618,3 +3686,19 @@ async function moveCategoryDown(i) {
     });
     await loadCategories();
 }
+
+// Re-render transaction list as cards or table when crossing the 768px breakpoint
+;(function () {
+    let _wasMobile = window.innerWidth <= 768;
+    let _resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(() => {
+            const nowMobile = window.innerWidth <= 768;
+            if (nowMobile !== _wasMobile) {
+                _wasMobile = nowMobile;
+                if (_lastTransactionData) renderFilteredTable(_lastTransactionData);
+            }
+        }, 150);
+    });
+}());
