@@ -2696,6 +2696,29 @@ let plaidHandler = null;
 let plaidCandidates = [];
 let plaidFilteredOut = [];
 
+async function _plaidOnSuccess(public_token, metadata) {
+    const account = metadata.accounts[0];
+    const institutionName = metadata.institution.name;
+
+    const displayName = window.prompt(
+        `What would you like to call this account?\n(e.g. "Chase", "Capital One", "Venmo")`,
+        institutionName
+    );
+    if (displayName === null) return;
+
+    await fetch('/api/plaid/exchange-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            public_token,
+            institution_name: institutionName,
+            account_name: displayName.trim() || institutionName,
+            account_id: account.id,
+        })
+    });
+    await loadPlaidAccounts();
+}
+
 async function initPlaidLink() {
     // Fetch a fresh Link token from the backend and initialise the Plaid SDK
     const res = await fetch('/api/plaid/link-token', { method: 'POST' });
@@ -2704,31 +2727,30 @@ async function initPlaidLink() {
 
     plaidHandler = Plaid.create({
         token: data.link_token,
-        onSuccess: async (public_token, metadata) => {
-            const account = metadata.accounts[0];
-            const institutionName = metadata.institution.name;
-
-            // Ask the user what they want to call this account before saving
-            const displayName = window.prompt(
-                `What would you like to call this account?\n(e.g. "Chase", "Capital One", "Venmo")`,
-                institutionName
-            );
-            if (displayName === null) return; // user hit Cancel
-
-            await fetch('/api/plaid/exchange-token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    public_token,
-                    institution_name: institutionName,
-                    account_name: displayName.trim() || institutionName,
-                    account_id: account.id,
-                })
-            });
-            await loadPlaidAccounts();
-        },
+        onSuccess: _plaidOnSuccess,
         onExit: (err) => { if (err) console.error('Plaid Link exit error:', err); },
     });
+}
+
+// OAuth return handler — Chase and other OAuth institutions redirect back here
+// with ?oauth_state_id=... after the user authenticates on their bank's website.
+async function _handlePlaidOAuthReturn() {
+    const oauthStateId = new URLSearchParams(window.location.search).get('oauth_state_id');
+    if (!oauthStateId) return;
+
+    // Clean the OAuth params from the URL immediately so a page refresh doesn't re-trigger
+    window.history.replaceState({}, '', window.location.pathname);
+
+    const res = await fetch('/api/plaid/link-token', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) { alert('Plaid OAuth return failed: ' + data.error); return; }
+
+    Plaid.create({
+        token: data.link_token,
+        receivedRedirectUri: window.location.href,
+        onSuccess: _plaidOnSuccess,
+        onExit: (err) => { if (err) console.error('Plaid OAuth exit:', err); },
+    }).open();
 }
 
 function openPlaidLink() {
@@ -3424,6 +3446,9 @@ function showConflictModal(description, options) {
 
 //---------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', async function() {
+    // Handle Plaid OAuth return (Chase etc.) before anything else
+    await _handlePlaidOAuthReturn();
+
     // 1. Setup the static dropdowns (Years and Rule Categories)
     setupYearDropdown();
     setupCategoryDropdowns();

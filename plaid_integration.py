@@ -36,20 +36,23 @@ def _get_client():
     return plaid_api.PlaidApi(ApiClient(configuration))
 
 
-def create_link_token(user_id='spending-tracker-user'):
+def create_link_token(user_id='spending-tracker-user', redirect_uri=None):
     """
     Creates a Plaid Link token that the frontend uses to open the
-    bank-connection popup. user_id just needs to be a stable string
-    identifying this user — for a single-user app, a constant is fine.
+    bank-connection popup. redirect_uri is required in production for
+    OAuth institutions like Chase that redirect the user off-site.
     """
     client = _get_client()
-    request = LinkTokenCreateRequest(
+    params = dict(
         products=[Products('transactions')],
         client_name='Spending Tracker',
         country_codes=[CountryCode('US')],
         language='en',
         user=LinkTokenCreateRequestUser(client_user_id=user_id)
     )
+    if redirect_uri:
+        params['redirect_uri'] = redirect_uri
+    request = LinkTokenCreateRequest(**params)
     response = client.link_token_create(request)
     return response['link_token']
 

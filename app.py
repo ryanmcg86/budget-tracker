@@ -1196,7 +1196,8 @@ def remove_transaction_tag(txn_id, tag_id):
 def plaid_link_token():
     try:
         from plaid_integration import create_link_token
-        token = create_link_token()
+        redirect_uri = os.getenv('PLAID_REDIRECT_URI')
+        token = create_link_token(redirect_uri=redirect_uri)
         return jsonify({'link_token': token})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
